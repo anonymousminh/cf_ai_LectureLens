@@ -39,7 +39,7 @@
 
 	"services": [
 		{
-			"binding": "API",
+			"binding": "WORKER-BACKEND",
 			"service": "worker-backend"
 		}
 	]
