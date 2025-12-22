@@ -12,7 +12,15 @@
  */
 
 export default {
-	async fetch(request, env, ctx): Promise<Response> {
-		return new Response('Hello World!');
-	},
-} satisfies ExportedHandler<Env>;
+	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+		const url = new URL(request.url);
+		const path = url.pathname;
+
+		// Implement simple routing
+		if (path == '/' && request.method == 'GET') {
+			return new Response('LectureLens API is running!', { status: 200 });
+		}
+
+		return new Response('Not Found.', { status: 404 });
+	}
+};
