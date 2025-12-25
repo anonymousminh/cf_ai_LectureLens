@@ -10,6 +10,9 @@
  *
  * Learn more at https://developers.cloudflare.com/workers/
  */
+interface Env{
+	AI: any;
+}
 
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -20,6 +23,17 @@ export default {
 		if (path == '/' && request.method == 'GET') {
 			return new Response('LectureLens API is running!', { status: 200 });
 		}
+
+		if (path == '/api/ai-test' && request.method == 'GET'){
+
+		
+		// Call the Worker API
+		const response = await env.AI.run("@cf/meta/llama-3-8b-instruct", {prompt: "What is Cloudflare in one sentence?"});
+
+		// Return the response from the worker AI
+		return new Response(JSON.stringify(response));
+		}
+
 
 		return new Response('Not Found.', { status: 404 });
 	}
