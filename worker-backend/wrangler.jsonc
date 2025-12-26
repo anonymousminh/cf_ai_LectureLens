@@ -39,6 +39,12 @@
 	 */
 	// "services": [  {   "binding": "MY_SERVICE",   "service": "my-service"  } ]
 	"ai":{
-		"binding": "AI"
-	}
+		"binding": "AI",
+	},
+	"durable_objects": {
+		"bindings": [{
+			"name": "LECTURE_MEMORY",
+			"class_name": "LectureMemory"
+		}]
+	},
 }
