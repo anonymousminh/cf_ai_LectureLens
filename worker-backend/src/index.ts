@@ -61,16 +61,24 @@ export default {
 			}
 		}
 
-		if (path == '/api/do-test' && request.method == 'GET'){
+		if (path.startsWith('/api/do-test')){
+			// Get the DO id and stub
 			const id = env.LECTURE_MEMORY.idFromName("test-lecture-id");
 			const stub = env.LECTURE_MEMORY.get(id);
 
+			// Construct the URL to pass to DO
+			const url = new URL(request.url);
+			url.pathname = path.substring('/api/do-test'.length);
+
+			// Create a new request with the URL
+			const newRequest = new Request(url.toString(), request);
+
 			// Forward the request to DO
-			const doResponse = await stub.fetch(request.url);
+			const doResponse = await stub.fetch(newRequest);
 			return doResponse;
 		}
 
-		return new Response('Not Found.', { status: 404 });
+		return new Response('Not Found', { status: 404 });
 	}
 };
 
