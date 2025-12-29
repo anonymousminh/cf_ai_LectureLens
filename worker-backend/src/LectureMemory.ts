@@ -1,40 +1,45 @@
-interface SaveDataRequest {
-    value: string;
+interface ChatRequest {
+  message: string;
 }
 
 export class LectureMemory {
-    state: DurableObjectState;
-    env: any;
+  state: DurableObjectState;
+  env: any;
 
-    constructor(state: DurableObjectState, env: any) {
-        this.state = state;
-        this.env = env;
+  constructor(state: DurableObjectState, env: any) {
+    this.state = state;
+    this.env = env;
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const path = url.pathname;
+
+    // Chat endpoint
+    if (path === '/chat' && request.method === 'POST') {
+      try {
+        const { message } = (await request.json()) as ChatRequest;
+
+        return new Response(JSON.stringify({
+          response: `Received message: "${message}". Ready for memory implementation.`,
+          doId: this.state.id.toString()
+        }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } catch (error) {
+        console.error('Error processing chat request:', error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return new Response(JSON.stringify({
+          error: 'Failed to process chat request',
+          details: errorMessage
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
     }
 
-    async fetch(request: Request): Promise<Response>{
-        const url = new URL(request.url);
-        const segments = url.pathname.split('/').filter(Boolean);
-        const action = segments[segments.length - 1];
-
-        // Endpoint to save data
-        if (action == 'save' && request.method == 'POST'){
-            const {value} = (await request.json()) as SaveDataRequest;
-            if (!value){
-                return new Response(`Missing "value in the request body"`, {status: 400});
-            }
-            await this.state.storage.put("test-data", value);
-            return new Response(`Saved: ${value}`, {status: 200});
-        }
-
-        // Endpoint to retrieve data
-        if (action == 'get' && request.method == 'GET'){
-            const value = await this.state.storage.get("test-data");
-
-            if (value == undefined){
-                return new Response(`No data found`, {status: 404});
-            }
-            return new Response(`Retrieved: ${value}`, {status: 200});
-        }
-        return new Response(`LectureMemory DO is active`, {status: 200});
-    }
+    // Fallback
+    return new Response("LectureMemory DO is active, but no action matched.", { status: 200 });
+  }
 }
