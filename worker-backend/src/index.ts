@@ -10,76 +10,113 @@
  *
  * Learn more at https://developers.cloudflare.com/workers/
  */
-import { LectureMemory} from "./LectureMemory";
-interface Env{
-	AI: any;
-	LECTURE_MEMORY: DurableObjectNamespace;
+import { LectureMemory } from './LectureMemory';
+
+interface Env {
+  AI: any;
+  LECTURE_MEMORY: DurableObjectNamespace;
 }
 
-export default {
-	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-		const url = new URL(request.url);
-		const path = url.pathname;
-
-		// Implement simple routing
-		if (path == '/' && request.method == 'GET') {
-			return new Response('LectureLens API is running!', { status: 200 });
-		}
-
-		// Summarize endpoint
-		if (path == '/api/summarize' && request.method == 'POST'){
-			try {
-				const { text } = await request.json() as { text?: string };
-
-				if (!text){
-					return new Response('Text is required', { status: 400 });
-				}
-
-				// Define the system prompt for the AI
-				const prompt = `
-					You are a helpful study assistant. Summarize the following lecture transcript into clear, structured key points. Use markdown format for readability.
-					Here is the lecture transcript:
-					${text}
-				`;
-
-				// Call the AI
-				const response = await env.AI.run("@cf/meta/llama-3-8b-instruct", {
-					prompt: prompt,
-				});
-
-				// Extract the summary from the response
-				const summary = response.response;
-
-				return new Response(JSON.stringify({ summary }), {
-					headers: {
-						'Content-Type': 'application/json',
-					},
-				});	
-			} catch (error) {
-				console.error('Error summarizing text:', error);
-				return new Response('Error summarizing text', { status: 500 });
-			}
-		}
-
-		if (path.startsWith('/api/do-test')){
-			// Get the DO id and stub
-			const id = env.LECTURE_MEMORY.idFromName("test-lecture-id");
-			const stub = env.LECTURE_MEMORY.get(id);
-
-			// Construct the URL to pass to DO
-			const url = new URL(request.url);
-			url.pathname = path.substring('/api/do-test'.length);
-
-			// Create a new request with the URL
-			const newRequest = new Request(url.toString(), request);
-
-			// Forward the request to DO
-			const doResponse = await stub.fetch(newRequest);
-			return doResponse;
-		}
-
-		return new Response('Not Found', { status: 404 });
-	}
-};
-
 export { LectureMemory };
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+    const path = url.pathname;
+
+    // Contextual Chat Endpoint
+    // Handles requests like /api/chat/lecture-uuid-123
+    if (path.startsWith('/api/chat/')) {
+      const segments = path.split('/').filter(Boolean);
+      const lectureId = segments[segments.length - 1];
+
+      if (!lectureId) {
+        return new Response('Missing lecture ID in path.', { status: 400 });
+      }
+
+      // Get the Durable Object ID and stub using the lectureId
+      const id = env.LECTURE_MEMORY.idFromName(lectureId);
+      const stub = env.LECTURE_MEMORY.get(id);
+
+      // Construct a new URL to pass to the DO, stripping the /api/chat/ prefix
+      const newUrl = new URL(request.url);
+      const remainingPath = newUrl.pathname.substring(`/api/chat/${lectureId}`.length);
+      
+      // If the path is now empty or just '/', set it to a default action like /chat
+      if (remainingPath === '' || remainingPath === '/') {
+        newUrl.pathname = '/chat';
+      } else {
+        newUrl.pathname = remainingPath;
+      }
+
+      // Create a new Request object with the modified URL
+      // Clone the request to ensure the body stream can be read
+      const newRequest = new Request(newUrl.toString(), request.clone());
+
+      // Forward the request to the unique Durable Object instance
+      try {
+        // Add a timeout to prevent infinite hangs (30 seconds)
+        const timeoutPromise = new Promise<Response>((_, reject) => {
+          setTimeout(() => reject(new Error('DO request timeout after 30s')), 30000);
+        });
+        
+        const doResponse = await Promise.race([
+          stub.fetch(newRequest),
+          timeoutPromise
+        ]);
+        
+        return doResponse;
+      } catch (error) {
+        console.error('Error calling Durable Object:', error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return new Response(JSON.stringify({
+          error: 'Failed to reach Durable Object',
+          details: errorMessage
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+    }
+
+    // Summarization Endpoint
+    if (path === '/api/summarize' && request.method === 'POST') {
+      try {
+        const { text } = await request.json() as { text?: string };
+
+        if (!text) {
+          return new Response('Missing "text" in request body', { status: 400 });
+        }
+
+        const systemPrompt = "You are a helpful study assistant. Summarize the following lecture transcript into clear, structured key points. Use Markdown formatting for readability.";
+        const userPrompt = `Lecture Transcript:\n\n${text}`;
+
+        const model = '@cf/meta/llama-3-8b-instruct';
+        const response = await env.AI.run(model, {
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ]
+        });
+
+        const summary = response.response;
+
+        return new Response(JSON.stringify({ summary }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+      } catch (error) {
+        console.error('Summarization Error:', error);
+        return new Response('Internal Server Error during summarization.', { status: 500 });
+      }
+    }
+
+    // Root Endpoint
+    if (path === '/' && request.method === 'GET') {
+      return new Response('LectureLens API is running!', { status: 200 });
+    }
+
+    // 404 Fallback
+    return new Response('Not Found.', { status: 404 });
+  },
+};
