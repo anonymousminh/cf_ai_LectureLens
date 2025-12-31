@@ -28,7 +28,7 @@ export default {
     // Handles requests like /api/chat/lecture-uuid-123
     if (path.startsWith('/api/chat/')) {
       const segments = path.split('/').filter(Boolean);
-      const lectureId = segments[segments.length - 1];
+      const lectureId = segments[2];
 
       if (!lectureId) {
         return new Response('Missing lecture ID in path.', { status: 400 });
