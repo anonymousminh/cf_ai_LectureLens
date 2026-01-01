@@ -111,6 +111,44 @@ export default {
       }
     }
 
+    // File Upload Endpoint
+    if (path === '/api/upload' && request.method === 'POST') {
+      try {
+        // 1. Check the content type to ensure it's a file upload
+        const contentType = request.headers.get('Content-Type');
+        if (!contentType || ! contentType.includes('multipart/form-data')) {
+          return new Response('Invalid content type. Expected multipart/form-data.', { status: 400 });
+        }
+
+        // 2. Parse the multipart form data
+        const formData = await request.formData();
+        
+        // 3. Extract the file from the form data
+        const file = formData.get('lectureFile');
+
+        if (!file || typeof file === 'string') {
+          return new Response('No file uploaded or invalid file type.', { status: 400 });
+        }
+
+        // 4. Read the file content as text
+        const lectureText = await file.text();
+
+        // 5. For now, log the first 100 characters of the file content and return a success response
+        console.log(`Received file: ${file.name}. Content preview: ${lectureText.substring(0, 100)}...`);
+
+        return new Response(JSON.stringify({
+          message: 'File uploaded successfully',
+          filename: file.name,
+          contentLength: lectureText.length,
+        }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } catch (error) {
+        console.error('File Upload Error:', error);
+        return new Response('Internal Server Error during file upload.', { status: 500 });
+      }
+    }
+
     // Root Endpoint
     if (path === '/' && request.method === 'GET') {
       return new Response('LectureLens API is running!', { status: 200 });
