@@ -12,6 +12,10 @@ interface ChatHistory {
   messages: ChatMessage[];
 }
 
+interface LectureContentRequest{
+  lectureText: string;
+}
+
 export class LectureMemory {
   state: DurableObjectState;
   env: any;
@@ -24,18 +28,6 @@ export class LectureMemory {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
-
-    // Debug endpoint to check history
-    if (path === '/debug/history' && request.method === 'GET') {
-      const HISTORY_KEY = "chat_history";
-      const history = (await this.state.storage.get<ChatHistory>(HISTORY_KEY)) || {messages: []};
-      return new Response(JSON.stringify({
-        history: history.messages,
-        count: history.messages.length
-      }), {
-        headers: {'Content-Type': 'application/json'}
-      });
-    }
 
     // Chat endpoint
     if (path === '/chat' && request.method === 'POST') {
@@ -108,6 +100,39 @@ export class LectureMemory {
         }), {
           status: 500,
           headers: { 'Content-Type': 'application/json' }
+        });
+      }
+    }
+
+    // Lecture endpoint
+    if (path === '/lecture' && request.method === 'POST'){
+      try {
+      // Define the json lecture text body
+      const {lectureText} = (await request.json()) as LectureContentRequest;
+
+      if (!lectureText){
+        return new Response('Missing lectureText property in the body', {status: 400});
+      }
+      // Define the key for lecture text
+      const LECTURE_KEY = "raw_lecture_text";
+
+      // Save the lecture text to the storage
+      await this.state.storage.put(LECTURE_KEY, lectureText);
+
+      return new Response(JSON.stringify({
+        response: 'Received and stored the lecture content successfully'
+      }), {
+        headers: {'Content-Type': 'application/json'}
+      });
+      } catch (error){
+        console.log('Error when save the lecture text', error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return new Response(JSON.stringify({
+          error: 'Fail to process the lecture content',
+          details: errorMessage
+        }), {
+          status: 500,
+          headers: {'Content-Type': 'application/json'}
         });
       }
     }
