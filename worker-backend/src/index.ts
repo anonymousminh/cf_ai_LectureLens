@@ -170,6 +170,18 @@ export default {
       }
     }
 
+    // Handle OPTIONS request (preflight checks)
+    if (request.method === 'OPTIONS'){
+      return new Response(null, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+        },
+      });
+    }
+
+
     // Root Endpoint
     if (path === '/' && request.method === 'GET') {
       return new Response('LectureLens API is running!', { status: 200 });
