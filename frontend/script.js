@@ -1,3 +1,6 @@
+// Use relative path - works with Pages Functions proxy in both dev and production
+const API_BASE_PATH = '/api';
+let currentLectureId = 'lecture-12345';
 // Get the DOM elements
 
 chatInput = document.getElementById("chat-input");
@@ -17,10 +20,12 @@ function displayMessage(text, role){
     chatWindow.appendChild(messageElement);
     // Implement auto-scrolling
     chatWindow.scrollTop = chatWindow.scrollHeight;
+
+    return messageElement;
 }
 
 // Handle Send Message
-function sendMessage(){
+async function sendMessage(){
     // Get the message and trim whitespace
     const messageText = chatInput.value.trim();
 
@@ -29,14 +34,36 @@ function sendMessage(){
         return;
     }
 
-    // Display the user's message
+    // Display the user's message and clear the input
     displayMessage(messageText, 'user');
+    chatInput.value = '';
 
-    // Simulate the assistant response
-    displayMessage("Thinking...", 'assistant')
+    // ------ This is the loading state ------
 
-    // Clear the input field
-    chatInput.value = ''
+    // Disable the input and send button immediately after user send messages
+    chatInput.disable = true;
+    sendButton.disable = true;
+
+    // Display the loading assistant response
+    const loadingMessage = displayMessage("Thinking...", 'assistant')
+
+    try {
+    // Await the result of callChatAPI
+    const aiResponse = await callChatAPI(messageText);
+
+    // Display the AI response
+    loadingMessage.textContent = aiResponse;
+    } catch (error){
+        console.log("Chat Error:", error);
+        loadingMessage.textContent = `Error: ${error.message}. Please try again.`;
+    } finally {
+        // ------ End loading state ------
+        // Re-enable the UI
+        chatInput.disable = false;
+        sendButton.disable = false;
+    }
+
+
 }
 
 // Handle Send Button Click
@@ -49,3 +76,33 @@ chatInput.addEventListener('keypress', function(event) {
         sendMessage();
     }
 })
+
+// callChatAPI function
+async function callChatAPI(message) {
+    // Construct the full URL
+    const url = `${API_BASE_PATH}/chat/${currentLectureId}`;
+
+    try {
+        // Use the global fetch to send the POST request
+        const response = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message: message})
+    });
+
+    // Check the HTTP errors
+    if (!response.ok){
+        const errorBody = await response.json;
+        throw new Error(`API Error (${response.status}): ${errorBody.error || errorBody.message || 'Unknown error'}`);
+    }
+
+    // Parsing the JSON body and return the AI response
+    const data = await response.json();
+    return data.response;
+
+    } catch (error){
+        console.log(`Fetch failed:`, error);
+        throw new Error(`Chat failed: ${error.message}`);
+    }
+    
+}
