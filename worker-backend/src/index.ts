@@ -105,7 +105,7 @@ export default {
         const systemPrompt = "You are a helpful study assistant. Summarize the following lecture transcript into clear, structured key points. Use Markdown formatting for readability.";
         const userPrompt = `Lecture Transcript:\n\n${text}`;
 
-        const model = '@cf/meta/llama-3-8b-instruct';
+        const model = '@cf/meta/llama-3.1-8b-instruct';
         const response = await env.AI.run(model, {
           messages: [
             { role: 'system', content: systemPrompt },
