@@ -109,8 +109,14 @@ function displayMessage(text, role){
     const messageElement = document.createElement('div');
     // Set its class to include message and the role
     messageElement.classList.add('message', role);
-    // Set its text content
-    messageElement.textContent = text;
+
+    if (role === 'assistant'){
+        // Use marked.js to render the text as HTML
+        messageElement.innerHTML = marked.parse(text);
+    } else {
+        // Set its text content
+        messageElement.textContent = text;
+    }
     // Apend the new div to the chat-window
     chatWindow.appendChild(messageElement);
     // Implement auto-scrolling
@@ -239,7 +245,7 @@ async function callSummerizeAPI(){
         const summarizeData = await summarizeResponse.json();
         const summary = summarizeData.summary;
 
-        loadingMessage.textContent = `Lecture Summary: ${summary}`;
+        loadingMessage.innerHTML = marked.parse(`Lecture Summary:\n\n ${summary}`);
         loadingMessage.classList.remove('system');
         loadingMessage.classList.add('assistant');
     } catch (error){
@@ -291,7 +297,7 @@ async function callExtractAPI(){
         const extractData = await extractResponse.json();
         const concepts = extractData.coreConcepts;
 
-        loadingMessage.textContent = `Extracted Concepts: ${concepts}`;
+        loadingMessage.innerHTML = marked.parse(`Extracted Concepts:\n\n ${concepts}`);
         loadingMessage.classList.remove('system');
         loadingMessage.classList.add('assistant');
     } catch (error){
@@ -321,14 +327,11 @@ function initializeApp(){
         currentLectureId = storedLectureId;
         displayMessage(`Welcome back! Continuing chat for your last lecture.`, 'system');
         // Enable the UI
-        chatInput.disabled = false;
-        sendButton.disabled = false;
-        chatInput.focus();
+        setUIState(true);
     } else {
         displayMessage(`Welcome! Please upload your materials to begin`, 'system');
         // Disable the UI
-        chatInput.disabled = true;
-        sendButton.disabled = true;
+        setUIState(false);
     }
     // File upload input is always enabled initially
     lectureUploadInput.disabled = false;
