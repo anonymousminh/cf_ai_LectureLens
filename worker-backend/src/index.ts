@@ -12,6 +12,7 @@
  */
 import { LectureMemory } from './LectureMemory';
 import { hashPassword } from './auth';
+import { validateSession } from './auth';
 
 interface Env {
   AI: any;
@@ -40,14 +41,22 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // Contextual Chat Endpoint
+    // CONTEXTUAL CHAT ENDPOINT
     // Handles requests like /api/chat/lecture-uuid-123
     if (path.startsWith('/api/chat/')) {
-      const segments = path.split('/').filter(Boolean);
-      const lectureId = segments[2];
+      // --- VALIDATE SESSION ---
+      const userId = await validateSession(request, env.lecturelens_db);
+      if (!userId){
+        return addCorsHeaders(new Response('Unauthorized', { status: 401 }));
+      }
 
-      if (!lectureId) {
-        return addCorsHeaders(new Response('Missing lecture ID in path.', { status: 400 }));
+      // --- AUTHORIZATION (Ownership Check) ---
+      const segments = path.split('/').filter(Boolean);
+      const lectureId = segments[segments.length - 1];
+
+      const ownership = await env.lecturelens_db.prepare('SELECT user_id FROM user_lectures WHERE user_id = ? AND lecture_id = ?').bind(userId, lectureId).first();
+      if (!ownership){
+        return addCorsHeaders(new Response('Forbidden: You do not have access to this lecture.', { status: 403 }));
       }
 
       // Get the Durable Object ID and stub using the lectureId
@@ -95,8 +104,23 @@ export default {
       }
     }
 
-    // Summarization Endpoint
+    // SUMMARIZATION ENDPOINT
     if (path === '/api/summarize' && request.method === 'POST') {
+      // --- VALIDATE SESSION ---
+      const userId = await validateSession(request, env.lecturelens_db);
+      if (!userId){
+        return addCorsHeaders(new Response('Unauthorized', { status: 401 }));
+      }
+
+      // --- AUTHORIZATION (Ownership Check) ---
+      const segments = path.split('/').filter(Boolean);
+      const lectureId = segments[segments.length - 1];
+
+      const ownership = await env.lecturelens_db.prepare('SELECT user_id FROM user_lectures WHERE user_id = ? AND lecture_id = ?').bind(userId, lectureId).first();
+      if (!ownership){
+        return addCorsHeaders(new Response('Forbidden: You do not have access to this lecture.', { status: 403 }));
+      }
+
       try {
         const { text } = await request.json() as { text?: string };
 
@@ -127,7 +151,7 @@ export default {
       }
     }
 
-    // File Upload Endpoint
+    // UPLOAD FILE ENDPOINT
     if (path === '/api/upload' && request.method === 'POST') {
       const userId = request.headers.get("X-User-Id");
 
@@ -195,17 +219,28 @@ export default {
       }
     }
 
-    // Extract core concepts endpoint
+    // EXTRACT CONCEPTS ENDPOINT
     // This endpoint will take the lectureId -> retrieve the raw lecture text -> extract the core concepts using Worker AI-> return the core concepts
     if (path === '/api/extract-concepts' && request.method === 'POST') {
+      // --- VALIDATE SESSION ---
+      const userId = await validateSession(request, env.lecturelens_db);
+      if (!userId){
+        return addCorsHeaders(new Response('Unauthorized', { status: 401 }));
+      }
+
+      // --- AUTHORIZATION (Ownership Check) ---
+      const { lectureId } = await request.json() as { lectureId: string };
+      if (!lectureId) {
+        return addCorsHeaders(new Response('Missing lectureId in request body', { status: 400 }));
+      }
+
+      const ownership = await env.lecturelens_db.prepare('SELECT user_id FROM user_lectures WHERE user_id = ? AND lecture_id = ?').bind(userId, lectureId).first();
+      if (!ownership){
+        return addCorsHeaders(new Response('Forbidden: You do not have access to this lecture.', { status: 403 }));
+      }
+
+      // --- MAIN LOGIC ---
       try {
-        // Get the lectureId from the request body
-        const { lectureId } = await request.json() as { lectureId: string };
-
-        if (!lectureId) {
-          return addCorsHeaders(new Response('Missing lectureId in request body', { status: 400 }));
-        }
-
         // Get the Durable Object and stub for the lectureId
         const id = env.LECTURE_MEMORY.idFromName(lectureId);
         const stub = env.LECTURE_MEMORY.get(id);
@@ -256,7 +291,7 @@ export default {
       }
     }
 
-    // Signup endpoint
+    // SIGNUP ENDPOINT
     if (path === '/api/auth/signup' && request.method === 'POST') {
       
         const { email, password } = await request.json() as { email: string, password: string };
@@ -285,7 +320,7 @@ export default {
       }
     }
 
-    // Login endpoint
+    // LOGIN ENDPOINT
     if (path === '/api/auth/login' && request.method === 'POST') {
       try {
         const { email, password } = await request.json() as { email: string, password: string };
@@ -309,6 +344,27 @@ export default {
         }
       } catch (error) {
         console.error('Login error:', error);
+        return addCorsHeaders(new Response('Internal Server Error', { status: 500 }));
+      }
+    }
+
+    // GET MY LECTURES ENDPOINT
+    if (path === '/api/my-lectures' && request.method === 'GET') {
+      // --- VALIDATE SESSION ---
+      const userId = await validateSession(request, env.lecturelens_db);
+      if (!userId){
+        return addCorsHeaders(new Response('Unauthorized', { status: 401 }));
+      }
+
+      // --- MAIN LOGIC ---
+      try {
+        // Query the database for the lectures owned by this user
+        const {results} = await env.lecturelens_db.prepare('SELECT lecture_id FROM user_lectures WHERE user_id = ?').bind(userId).all();
+
+        // Return the lectures
+        return addCorsHeaders(new Response(JSON.stringify({ lectures: results }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      } catch (error) {
+        console.error('Get my lectures error:', error);
         return addCorsHeaders(new Response('Internal Server Error', { status: 500 }));
       }
     }
