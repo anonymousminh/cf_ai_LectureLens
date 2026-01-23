@@ -12,27 +12,46 @@ function hexToBuf(hex: string): ArrayBuffer {
 
 // Async function for validating session
 export async function validateSession(request: Request, db: D1Database){
-    // 1. Get the Authentication header
-    const authHeader = request.headers.get('Authorization');
-    
-    // 2. Check if it exists and follows the "Bearer <token>" format
-    if (!authHeader || !authHeader.startsWith('Bearer ')){
-        return null;
-    }
+   // Get the Authorization header
+   const authHeader = request.headers.get('Authorization');
+   
+   // Check if it exists and follows the "Bearer <token>" format
+   if (!authHeader || !authHeader.startsWith('Bearer ')){
+       return null;
+   }
 
-    // 3. Extract the token from the header
-    const userId = authHeader.split(' ')[1];
+   // Extract the token from the header
+   const token = authHeader.split(' ')[1];
+   
+   if (!token){
+       return null;
+   }
 
-    try {
-        // 4. Verify the user exists in the database
-        const user = await db.prepare("SELECT id FROM users WHERE id = ?").bind(userId).first();
+   try {
+       // Query the database for the session with user_id and expires_at
+       const session = await db.prepare('SELECT user_id, expires_at FROM sessions WHERE token = ?').bind(token).first();
 
-        // 5. Return the userId if found, otherwise return null
-        return user ? userId : null;
-    } catch (error) {
-        console.error('Session validation error:', error);
-        return null;
-    }
+       // Check if the session exists
+       if (!session){
+           return null;
+       }
+
+       // Check if the session is expired (expires_at is stored as ISO string or timestamp)
+       const expiresAt = new Date(session.expires_at as string);
+       const now = new Date();
+       
+       if (expiresAt < now){
+           // Delete expired session during validation
+           await db.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run();
+           return null;
+       }
+
+       // Return the user_id if session is valid
+       return session.user_id as string;
+   } catch (error) {
+       console.error('Session validation error:', error);
+       return null;
+   }
 }
 
 export async function hashPassword(password: string, saltStr?: string){
