@@ -8,7 +8,21 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
-    <div id="app">
+    <!-- Auth App -->
+     <div id="auth-container">
+        <div id="auth-box">
+            <h1 id="auth-title">Login to LectureLens</h1>
+            <form id="auth-form">
+                <input type="email" id="auth-email" placeholder="Email">
+                <input type="password" id="auth-password" placeholder="Password">
+                <button type="submit" id="auth-button">Login</button>
+            </form>
+            <p id="auth-toggle-link">Don't have an account? <a href="#">Sign up</a></p>
+        </div>
+     </div>
+
+    <!-- Main App -->
+    <div id="main-app" style="display: none;">
         <h1>LectureLens Study Assistant</h1>
         <div id="main-content">
             <div id="lecture-sidebar">
@@ -26,6 +40,7 @@
             <button id="extract-button">Extract Concepts</button>
             <button id="send-button">Send</button>
             <button id="clear-button">Clear</button>
+            <button id="logout-button">Logout</button>
         </div>
     </div>
     
