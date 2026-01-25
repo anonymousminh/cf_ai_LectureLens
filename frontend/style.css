@@ -8,7 +8,7 @@ body {
     align-items: center;
     min-height: 100vh;
 }
-#app {
+#main-app {
     width: 100%;
     max-width: 1200px;
     height: 90vh;
@@ -157,3 +157,4 @@ h1 {
 label{
     color: white;
 }
+

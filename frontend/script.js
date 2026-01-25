@@ -1,14 +1,231 @@
 // Use relative path - works with Pages Functions proxy in both dev and production
 const API_BASE_PATH = '/api';
 let currentLectureId = null;
-// Get the DOM elements
 
+let isLoginMode = true; // Track if user is in login mode or signup mode
+let authToken = null; // Store the authentication token
+
+// Get the DOM elements for the auth form
+const authContainer = document.getElementById("auth-container");
+const authForm = document.getElementById("auth-form");
+const authTitle = document.getElementById("auth-title");
+const authButton = document.getElementById("auth-button");
+const authEmail = document.getElementById("auth-email");
+const authPassword = document.getElementById("auth-password");
+const authToggleLink = document.getElementById("auth-toggle-link");
+const mainApp = document.getElementById("main-app");
+const logoutButton = document.getElementById("logout-button");
+// Get the DOM elements
 const chatInput = document.getElementById("chat-input");
 const sendButton = document.getElementById("send-button");
 const chatWindow = document.getElementById("chat-window");
 const lectureUploadInput = document.getElementById("lecture-upload");
 const summarizeButton = document.getElementById("summarize-button");
 const extractButton = document.getElementById("extract-button");
+
+// Handle Auth Toggle Mode
+function toggleAuthMode(mode){
+    if (event){
+        event.preventDefault();
+    }
+
+    isLoginMode = !isLoginMode;
+
+    if (isLoginMode){
+        // Switch to login mode
+        authTitle.textContent = "Login to LectureLens";
+        authButton.textContent = "Login";
+        authToggleLink.innerHTML = "Don't have an account? <a href='#'>Sign up</a>";
+    } else {
+        // Switch to signup mode
+        authTitle.textContent = "Create an Account";
+        authButton.textContent = "Sign Up";
+        authToggleLink.innerHTML = "Already have an account? <a href='#'>Login</a>";
+    }
+
+    // Clear input fields
+    authEmail.value = '';
+    authPassword.value = '';
+}
+
+// Function for Signup
+async function signupUser(email, password){
+    const signupUrl = `${API_BASE_PATH}/auth/signup`;
+
+    const response = await fetch(signupUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({email: email, password: password})
+    });
+
+    if (!response.ok){
+        const errorText = await response.text();
+        throw new Error(errorText || 'Signup failed. Please try again.');
+    }
+    
+    return await response.json();
+}
+
+// Function for Login
+async function loginUser(email, password){
+    const loginUrl = `${API_BASE_PATH}/auth/login`;
+    
+    const response = await fetch(loginUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({email: email, password: password})
+    });
+
+    if (!response.ok){
+        const errorText = await response.text();
+        throw new Error(errorText || 'Login failed. Please try again.');
+    }
+    
+    return await response.json();
+}
+
+// Function for Logout
+async function logoutUser(){
+    const logoutUrl = `${API_BASE_PATH}/auth/logout`;
+    
+    const response = await fetch(logoutUrl, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+        },
+    });
+
+    if (!response.ok){
+        console.error('Logout failed');
+    }
+
+    // Clear local storage and reset state
+    localStorage.removeItem('LectureLens-authToken');
+    localStorage.removeItem('LectureLens-currentLectureId');
+    authToken = null;
+    currentLectureId = null;
+
+    // Show auth container and hide main app
+    authContainer.style.display = 'flex';
+    mainApp.style.display = 'none';
+
+    // Clear chat window
+    chatWindow.innerHTML = '';
+}
+
+// Function to handle authentication form submission
+async function handleAuthFormSubmit(event){
+    event.preventDefault(); // Prevent default form submission
+
+    const email = authEmail.value.trim();
+    const password = authPassword.value.trim();
+
+    if (!email || !password){
+        displayMessage('Please enter both email and password', 'error');
+        return;
+    }
+
+    // Basic email format check
+    if (!email.includes('@') || !email.includes('.')){
+        displayMessage('Please enter a valid email address', 'error');
+        return;
+    }
+
+    // Disable the form during submission
+    authEmail.disabled = true;
+    authPassword.disabled = true;
+    authButton.disabled = true;
+    authButton.textContent = 'Processing...';
+
+    try {
+        let response;
+
+        if (isLoginMode){
+            // Call login API
+            response = await loginUser(email, password);
+
+            // Store the authentication token
+            authToken = response.token;
+            localStorage.setItem('LectureLens-authToken', authToken);
+
+            // Show success and transition to main app
+            showMainApp();
+            displayMessage('Login successful! Welcome back!', 'system');
+        } else {
+            // Call signup API
+            response = await signupUser(email, password);
+
+            // After successful signup, automatically login the user
+            const loginResponse = await loginUser(email, password);
+            authToken = loginResponse.token;
+            localStorage.setItem('LectureLens-authToken', authToken);
+
+            // Show success and transition to main app
+            showMainApp();
+            displayMessage('Signup successful! Welcome to LectureLens!', 'system');
+        } 
+    } catch (error){
+        console.error('Auth error:', error);
+
+        // Display user-friendly error messages
+        let errorMessage = 'An error occurred. Please try again.';
+        
+        if (error.message.includes('Invalid email format')) {
+            errorMessage = 'Please enter a valid email address.';
+        } else if (error.message.includes('Invalid password length')) {
+            errorMessage = 'Password must be between 8 and 100 characters.';
+        } else if (error.message.includes('Invalid password complexity')) {
+            errorMessage = 'Password must include uppercase, lowercase, numbers, and special characters.';
+        } else if (error.message.includes('Email already in use')) {
+            errorMessage = 'This email is already registered. Please login instead.';
+        } else if (error.message.includes('Invalid credentials')) {
+            errorMessage = 'Invalid email or password. Please try again.';
+        }
+        
+        alert(errorMessage);
+
+    } finally {
+        // Re-enable the form
+        authEmail.disabled = false;
+        authPassword.disabled = false;
+        authButton.disabled = false;
+        authButton.textContent = isLoginMode ? 'Login' : 'Sign Up';
+    }
+}
+
+// Show Main App Function
+function showMainApp(){
+    authContainer.style.display = 'none';
+    mainApp.style.display = 'block';
+
+    // Clear auth form
+    authEmail.value = '';
+    authPassword.value = '';
+}
+
+// Show Auth Container Function
+function showAuthContainer(){
+    authContainer.style.display = 'flex';
+    mainApp.style.display = 'none';
+}
+
+// Handle 401 Unauthorized responses (expired or invalid token)
+function handleUnauthorized(){
+    alert('Your session has expired. Please login again.');
+    
+    // Clear local storage and reset state
+    localStorage.removeItem('LectureLens-authToken');
+    localStorage.removeItem('LectureLens-currentLectureId');
+    authToken = null;
+    currentLectureId = null;
+    
+    // Show auth container and hide main app
+    showAuthContainer();
+    
+    // Clear chat window
+    chatWindow.innerHTML = '';
+}
 
 // Handle File Upload Function
 async function handleFileUpload(){
@@ -70,8 +287,15 @@ async function uploadLecture(fileName, fileContent){
     try {
         const response = await fetch(uploadUrl, {
             method: 'POST',
+            headers: {'Authorization': `Bearer ${authToken}`},
             body: formData
         });
+
+        // Check for 401 Unauthorized (expired session)
+        if (response.status === 401){
+            handleUnauthorized();
+            return;
+        }
 
         // Check the HTTP errors
         if (!response.ok){
@@ -90,15 +314,14 @@ async function uploadLecture(fileName, fileContent){
         currentLectureId = newLectureId;
         localStorage.setItem('LectureLens-currentLectureId', newLectureId);
 
-        // Enable the UI
         setUIState(true);
         displayMessage(`Lecture "${fileName}" uploaded successfully! You can now ask questions about the lecture.`, 'system');
     } catch (error){
         console.log("Upload Lecture Error:", error);
         displayMessage(`Error: ${error.message}. Please try again.`, 'system');
-        setUIState(false);
     } finally {
         lectureUploadInput.disabled = false;
+        setUIState(true);
     }
 }
 
@@ -176,9 +399,15 @@ async function callChatAPI(message) {
         // Use the global fetch to send the POST request
         const response = await fetch(url, {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}`},
         body: JSON.stringify({message: message})
     });
+
+    // Check for 401 Unauthorized (expired session)
+    if (response.status === 401){
+        handleUnauthorized();
+        throw new Error('Session expired');
+    }
 
     // Check the HTTP errors
     if (!response.ok){
@@ -204,7 +433,15 @@ async function callSummerizeAPI(){
     try {
         // 1. Retrieve the raw lecture text from DO
         const rawTextUrl = `${API_BASE_PATH}/chat/${currentLectureId}/raw-lecture-text`;
-        const rawTextResponse = await fetch(rawTextUrl);
+        const rawTextResponse = await fetch(rawTextUrl, {
+            headers: {'Authorization': `Bearer ${authToken}`},
+        });
+
+        // Check for 401 Unauthorized (expired session)
+        if (rawTextResponse.status === 401){
+            handleUnauthorized();
+            return;
+        }
 
         if (!rawTextResponse.ok){
             const errorBody = await rawTextResponse.json();
@@ -222,9 +459,15 @@ async function callSummerizeAPI(){
         const summarizeUrl = `${API_BASE_PATH}/summarize`;
         const summarizeResponse = await fetch(summarizeUrl, {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({text: lectureContent})
+            headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}`},
+            body: JSON.stringify({text: lectureContent, lectureId: currentLectureId})
         });
+
+        // Check for 401 Unauthorized (expired session)
+        if (summarizeResponse.status === 401){
+            handleUnauthorized();
+            return;
+        }
 
         if (!summarizeResponse.ok){
             const errorBody = await summarizeResponse.json();
@@ -256,7 +499,15 @@ async function callExtractAPI(){
     try {
         // 1. Retrieve the raw lecture text from DO
         const rawTextUrl = `${API_BASE_PATH}/chat/${currentLectureId}/raw-lecture-text`;
-        const rawTextResponse = await fetch(rawTextUrl);
+        const rawTextResponse = await fetch(rawTextUrl, {
+            headers: {'Authorization': `Bearer ${authToken}`},
+        });
+
+        // Check for 401 Unauthorized (expired session)
+        if (rawTextResponse.status === 401){
+            handleUnauthorized();
+            return;
+        }
 
         if (!rawTextResponse.ok){
             const errorBody = await rawTextResponse.json();
@@ -274,9 +525,15 @@ async function callExtractAPI(){
         const extractUrl = `${API_BASE_PATH}/extract-concepts`;
         const extractResponse = await fetch(extractUrl, {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}`},
             body: JSON.stringify({lectureId: currentLectureId})
         });
+
+        // Check for 401 Unauthorized (expired session)
+        if (extractResponse.status === 401){
+            handleUnauthorized();
+            return;
+        }
 
         if (!extractResponse.ok){
             const errorBody = await extractResponse.json();
@@ -309,17 +566,29 @@ function setUIState(enabled){
 
 // Initialize the current lecture ID
 function initializeApp(){
+    // Check for the auth token first
+    const storedToken = localStorage.getItem('LectureLens-authToken');
+
+    if (!storedToken){
+        // No token, show auth screen
+        showAuthContainer();
+        return;
+    }
+
+    // Token exists, set it and show main app
+    authToken = storedToken;
+    showMainApp();
+
+
     // Try to get the lecture ID from localStorage
     const storedLectureId = localStorage.getItem('LectureLens-currentLectureId');
 
     if (storedLectureId){
         currentLectureId = storedLectureId;
         displayMessage(`Welcome back! Continuing chat for your last lecture.`, 'system');
-        // Enable the UI
         setUIState(true);
     } else {
         displayMessage(`Welcome! Please upload your materials to begin`, 'system');
-        // Disable the UI
         setUIState(false);
     }
     // File upload input is always enabled initially
@@ -344,6 +613,15 @@ summarizeButton.addEventListener('click', callSummerizeAPI);
 // Handle Extract Button Click
 extractButton.addEventListener('click', callExtractAPI);
 
+// Auth form submit listener
+authForm.addEventListener('submit', handleAuthFormSubmit);
+
+// Auth toggle link click listener
+authToggleLink.addEventListener('click', function(event) {
+    if (event.target.tagName === 'A'){
+        toggleAuthMode();
+    }
+});
 
 // Initialize the app
 document.addEventListener('DOMContentLoaded', initializeApp);
@@ -356,5 +634,8 @@ if (clearButton){
         window.location.reload();
     });
 }
+
+// Handle Logout Button Click
+logoutButton.addEventListener('click', logoutUser);
 
 
