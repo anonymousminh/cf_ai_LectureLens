@@ -11,16 +11,96 @@
  * Learn more at https://developers.cloudflare.com/workers/
  */
 import { LectureMemory } from './LectureMemory';
+import { RateLimiter } from './RateLimiter';
 import { hashPassword } from './auth';
 import { validateSession } from './auth';
 
 interface Env {
   AI: any;
   LECTURE_MEMORY: DurableObjectNamespace;
+  RATE_LIMITER: DurableObjectNamespace;
   lecturelens_db: D1Database;
 }
 
-export { LectureMemory };
+export { LectureMemory, RateLimiter };
+
+// Rate limiting types and helper functions
+interface RateLimitStatus {
+  allowed: boolean;
+  limit: number;
+  remaining: number;
+  resetAt: number;
+  retryAfter: number;
+}
+
+/**
+ * Check rate limit for a user/identifier on a specific endpoint
+ * @param identifier - userId for authenticated endpoints, IP for auth endpoints
+ * @param endpoint - endpoint name (chat, summarize, extract, upload, signup, login)
+ * @param env - Worker environment with bindings
+ * @returns Rate limit status
+ */
+async function checkRateLimit(
+  identifier: string,
+  endpoint: string,
+  env: Env
+): Promise<RateLimitStatus> {
+  try {
+    // Get or create RateLimiter DO for this identifier
+    const id = env.RATE_LIMITER.idFromName(identifier);
+    const stub = env.RATE_LIMITER.get(id);
+
+    // Call the DO to check and increment in one operation
+    const response = await stub.fetch(
+      `https://rate-limiter/check-and-increment?endpoint=${endpoint}`,
+      { method: 'POST' }
+    );
+
+    if (!response.ok) {
+      throw new Error('Rate limiter request failed');
+    }
+
+    const status = (await response.json()) as RateLimitStatus;
+    return status;
+  } catch (error) {
+    console.error('Rate limit check failed:', error);
+    // Fail open - allow request if rate limiter fails
+    return {
+      allowed: true,
+      limit: 999999,
+      remaining: 999999,
+      resetAt: Date.now() + 3600000,
+      retryAfter: 0,
+    };
+  }
+}
+
+/**
+ * Create a 429 response with rate limit information
+ */
+function createRateLimitResponse(status: RateLimitStatus): Response {
+  const response = new Response(
+    JSON.stringify({
+      error: 'Rate limit exceeded',
+      message: `Too many requests. Please try again in ${status.retryAfter} seconds.`,
+      retryAfter: status.retryAfter,
+      limit: status.limit,
+      resetAt: status.resetAt,
+    }),
+    {
+      status: 429,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-RateLimit-Limit': status.limit.toString(),
+        'X-RateLimit-Remaining': status.remaining.toString(),
+        'X-RateLimit-Reset': status.resetAt.toString(),
+        'Retry-After': status.retryAfter.toString(),
+      },
+    }
+  );
+
+  return addCorsHeaders(response);
+}
 
 // Helper function to add CORS headers to any response
 function addCorsHeaders(response: Response): Response {
@@ -47,16 +127,43 @@ export default {
       // --- VALIDATE SESSION ---
       const userId = await validateSession(request, env.lecturelens_db);
       if (!userId){
-        return addCorsHeaders(new Response('Unauthorized', { status: 401 }));
+        return addCorsHeaders(new Response(JSON.stringify({ error: 'Unauthorized' }), { 
+          status: 401,
+          headers: { 'Content-Type': 'application/json' }
+        }));
+      }
+
+      // --- RATE LIMITING ---
+      const rateLimitStatus = await checkRateLimit(userId, 'chat', env);
+      if (!rateLimitStatus.allowed) {
+        console.log('Rate limit exceeded for chat', { userId, remaining: rateLimitStatus.remaining });
+        return createRateLimitResponse(rateLimitStatus);
       }
 
       // --- AUTHORIZATION (Ownership Check) ---
       const segments = path.split('/').filter(Boolean);
-      const lectureId = segments[segments.length - 1];
+      // Paths we handle here:
+      // - /api/chat/:lectureId
+      // - /api/chat/:lectureId/raw-lecture-text
+      // - /api/chat/:lectureId/<other-do-routes>
+      // So the lectureId is the segment immediately after "chat", not the last segment.
+      const chatIndex = segments.indexOf('chat');
+      const lectureId = chatIndex >= 0 ? segments[chatIndex + 1] : undefined;
+      if (!lectureId) {
+        return addCorsHeaders(
+          new Response(JSON.stringify({ error: 'Bad Request: missing lecture id' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        );
+      }
 
       const ownership = await env.lecturelens_db.prepare('SELECT user_id FROM user_lectures WHERE user_id = ? AND lecture_id = ?').bind(userId, lectureId).first();
       if (!ownership){
-        return addCorsHeaders(new Response('Forbidden: You do not have access to this lecture.', { status: 403 }));
+        return addCorsHeaders(new Response(JSON.stringify({ error: 'Forbidden: You do not have access to this lecture.' }), { 
+          status: 403,
+          headers: { 'Content-Type': 'application/json' }
+        }));
       }
 
       // Get the Durable Object ID and stub using the lectureId
@@ -109,7 +216,17 @@ export default {
       // --- VALIDATE SESSION ---
       const userId = await validateSession(request, env.lecturelens_db);
       if (!userId){
-        return addCorsHeaders(new Response('Unauthorized', { status: 401 }));
+        return addCorsHeaders(new Response(JSON.stringify({ error: 'Unauthorized' }), { 
+          status: 401,
+          headers: { 'Content-Type': 'application/json' }
+        }));
+      }
+
+      // --- RATE LIMITING ---
+      const rateLimitStatus = await checkRateLimit(userId, 'summarize', env);
+      if (!rateLimitStatus.allowed) {
+        console.log('Rate limit exceeded for summarize', { userId, remaining: rateLimitStatus.remaining });
+        return createRateLimitResponse(rateLimitStatus);
       }
 
       try {
@@ -117,17 +234,26 @@ export default {
         const { text, lectureId } = await request.json() as { text?: string, lectureId?: string };
 
         if (!text) {
-          return addCorsHeaders(new Response('Missing "text" in request body', { status: 400 }));
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Missing "text" in request body' }), { 
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          }));
         }
 
         if (!lectureId) {
-          return addCorsHeaders(new Response('Missing "lectureId" in request body', { status: 400 }));
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Missing "lectureId" in request body' }), { 
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          }));
         }
 
         // --- AUTHORIZATION (Ownership Check) ---
         const ownership = await env.lecturelens_db.prepare('SELECT user_id FROM user_lectures WHERE user_id = ? AND lecture_id = ?').bind(userId, lectureId).first();
         if (!ownership){
-          return addCorsHeaders(new Response('Forbidden: You do not have access to this lecture.', { status: 403 }));
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Forbidden: You do not have access to this lecture.' }), { 
+            status: 403,
+            headers: { 'Content-Type': 'application/json' }
+          }));
         }
 
         const systemPrompt = "You are a helpful study assistant. Summarize the following lecture transcript into clear, structured key points. Use Markdown formatting for readability.";
@@ -149,7 +275,10 @@ export default {
 
       } catch (error) {
         console.error('Summarization Error:', error);
-        return addCorsHeaders(new Response('Internal Server Error during summarization.', { status: 500 }));
+        return addCorsHeaders(new Response(JSON.stringify({ error: 'Internal Server Error during summarization.' }), { 
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        }));
       }
     }
 
@@ -157,14 +286,27 @@ export default {
     if (path === '/api/upload' && request.method === 'POST') {
       const userId = await validateSession(request, env.lecturelens_db);
       if (!userId){
-        return addCorsHeaders(new Response('Unauthorized', { status: 401 }));
+        return addCorsHeaders(new Response(JSON.stringify({ error: 'Unauthorized' }), { 
+          status: 401,
+          headers: { 'Content-Type': 'application/json' }
+        }));
+      }
+
+      // --- RATE LIMITING ---
+      const rateLimitStatus = await checkRateLimit(userId, 'upload', env);
+      if (!rateLimitStatus.allowed) {
+        console.log('Rate limit exceeded for upload', { userId, remaining: rateLimitStatus.remaining });
+        return createRateLimitResponse(rateLimitStatus);
       }
 
       try {
         // 1. Check the content type to ensure it's a file upload
         const contentType = request.headers.get('Content-Type');
         if (!contentType || ! contentType.includes('multipart/form-data')) {
-          return addCorsHeaders(new Response('Invalid content type. Expected multipart/form-data.', { status: 400 }));
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Invalid content type. Expected multipart/form-data.' }), { 
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          }));
         }
 
         // 2. Parse the multipart form data
@@ -174,7 +316,10 @@ export default {
         const file = formData.get('lectureFile');
 
         if (!file || typeof file === 'string') {
-          return addCorsHeaders(new Response('No file uploaded or invalid file type.', { status: 400 }));
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'No file uploaded or invalid file type.' }), { 
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          }));
         }
 
         // 4. Read the file content as text
@@ -216,7 +361,10 @@ export default {
         }));
       } catch (error) {
         console.error('File Upload Error:', error);
-        return addCorsHeaders(new Response('Internal Server Error during file upload.', { status: 500 }));
+        return addCorsHeaders(new Response(JSON.stringify({ error: 'Internal Server Error during file upload.' }), { 
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        }));
       }
     }
 
@@ -226,18 +374,34 @@ export default {
       // --- VALIDATE SESSION ---
       const userId = await validateSession(request, env.lecturelens_db);
       if (!userId){
-        return addCorsHeaders(new Response('Unauthorized', { status: 401 }));
+        return addCorsHeaders(new Response(JSON.stringify({ error: 'Unauthorized' }), { 
+          status: 401,
+          headers: { 'Content-Type': 'application/json' }
+        }));
+      }
+
+      // --- RATE LIMITING ---
+      const rateLimitStatus = await checkRateLimit(userId, 'extract', env);
+      if (!rateLimitStatus.allowed) {
+        console.log('Rate limit exceeded for extract', { userId, remaining: rateLimitStatus.remaining });
+        return createRateLimitResponse(rateLimitStatus);
       }
 
       // --- AUTHORIZATION (Ownership Check) ---
       const { lectureId } = await request.json() as { lectureId: string };
       if (!lectureId) {
-        return addCorsHeaders(new Response('Missing lectureId in request body', { status: 400 }));
+        return addCorsHeaders(new Response(JSON.stringify({ error: 'Missing lectureId in request body' }), { 
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        }));
       }
 
       const ownership = await env.lecturelens_db.prepare('SELECT user_id FROM user_lectures WHERE user_id = ? AND lecture_id = ?').bind(userId, lectureId).first();
       if (!ownership){
-        return addCorsHeaders(new Response('Forbidden: You do not have access to this lecture.', { status: 403 }));
+        return addCorsHeaders(new Response(JSON.stringify({ error: 'Forbidden: You do not have access to this lecture.' }), { 
+          status: 403,
+          headers: { 'Content-Type': 'application/json' }
+        }));
       }
 
       // --- MAIN LOGIC ---
@@ -250,14 +414,20 @@ export default {
         const rawLectureResponse = await stub.fetch("https://do-placeholder/raw-lecture-text");
         
         if (!rawLectureResponse.ok) {
-          return addCorsHeaders(new Response('Failed to retrieve lecture text from Durable Object', { status: 500 }));
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Failed to retrieve lecture text from Durable Object' }), { 
+            status: 500,
+            headers: { 'Content-Type': 'application/json' }
+          }));
         }
 
         const rawLectureData = await rawLectureResponse.json() as { rawText: string };
         const rawLectureText = rawLectureData.rawText;
 
         if (!rawLectureText) {
-          return addCorsHeaders(new Response('No lecture text found', { status: 404 }));
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'No lecture text found' }), { 
+            status: 404,
+            headers: { 'Content-Type': 'application/json' }
+          }));
         }
 
         // Construct the system prompt for the Worker AI
@@ -294,33 +464,55 @@ export default {
 
     // SIGNUP ENDPOINT
     if (path === '/api/auth/signup' && request.method === 'POST') {
+      // --- IP-BASED RATE LIMITING ---
+      const ipAddress = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rateLimitStatus = await checkRateLimit(ipAddress, 'signup', env);
+      if (!rateLimitStatus.allowed) {
+        console.log('Rate limit exceeded for signup', { ip: ipAddress, remaining: rateLimitStatus.remaining });
+        return createRateLimitResponse(rateLimitStatus);
+      }
       
         const { email, password } = await request.json() as { email: string, password: string };
 
         // Validate the email format
         if (!email.includes('@') || !email.includes('.')){
-          return addCorsHeaders(new Response('Invalid email format', { status: 400 }));
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Invalid email format' }), { 
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          }));
         }
 
         // Check email length limits
         if (email.length < 3 || email.length > 254){
-          return addCorsHeaders(new Response('Invalid email length', { status: 400 }));
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Invalid email length' }), { 
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          }));
         }
 
         // Check password length limits
         if (password.length < 8 || password.length > 100){
-          return addCorsHeaders(new Response('Invalid password length', { status: 400 }));
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Invalid password length' }), { 
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          }));
         }
 
         // Check password complexity
         if (!password.match(/[A-Z]/g) || !password.match(/[a-z]/g) || !password.match(/[0-9]/g) || !password.match(/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/g)){
-          return addCorsHeaders(new Response('Invalid password complexity', { status: 400 }));
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Invalid password complexity' }), { 
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          }));
         }
 
         // Check if the email is already in use
         const existingUser = await env.lecturelens_db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
         if (existingUser){
-          return addCorsHeaders(new Response('Email already in use', { status: 400 }));
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Email already in use' }), { 
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          }));
         }
 
         const { hash, salt } = await hashPassword(password);
@@ -345,26 +537,46 @@ export default {
 
     // LOGIN ENDPOINT
     if (path === '/api/auth/login' && request.method === 'POST') {
+      // --- IP-BASED RATE LIMITING ---
+      const ipAddress = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rateLimitStatus = await checkRateLimit(ipAddress, 'login', env);
+      if (!rateLimitStatus.allowed) {
+        console.log('Rate limit exceeded for login', { ip: ipAddress, remaining: rateLimitStatus.remaining });
+        return createRateLimitResponse(rateLimitStatus);
+      }
+      
       try {
         const { email, password } = await request.json() as { email: string, password: string };
 
         if (!email || !password){
-          return addCorsHeaders(new Response('Missing email or password', { status: 400 }));
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Missing email or password' }), { 
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          }));
         }
 
         // Validate the email format
         if (!email.includes('@') || !email.includes('.')){
-          return addCorsHeaders(new Response('Invalid email format', { status: 400 }));
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Invalid email format' }), { 
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          }));
         }
 
         // Check email length limits
         if (email.length < 3 || email.length > 254){
-          return addCorsHeaders(new Response('Invalid email length', { status: 400 }));
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Invalid email length' }), { 
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          }));
         }
 
         // Basic password  length validation
         if (password.length < 8 || password.length > 100){
-          return addCorsHeaders(new Response('Invalid password length', { status: 400 }));
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Invalid password length' }), { 
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          }));
         }
 
         // Query for user
@@ -378,7 +590,10 @@ export default {
 
         // Check if user exists and password matches
         if (!user || hash !== user.password_hash){
-          return addCorsHeaders(new Response('Invalid credentials', { status: 401 }));
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Invalid credentials' }), { 
+            status: 401,
+            headers: { 'Content-Type': 'application/json' }
+          }));
         }
 
         // Generate a new token and store it in the database
@@ -397,7 +612,10 @@ export default {
         }), {status: 200, headers: { 'Content-Type': 'application/json' }}));
       } catch (error) {
         console.error('Login error:', error);
-        return addCorsHeaders(new Response('Internal Server Error', { status: 500 }));
+        return addCorsHeaders(new Response(JSON.stringify({ error: 'Internal Server Error' }), { 
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        }));
       }
     }
 
@@ -406,7 +624,10 @@ export default {
       // --- VALIDATE SESSION ---
       const userId = await validateSession(request, env.lecturelens_db);
       if (!userId){
-        return addCorsHeaders(new Response('Unauthorized', { status: 401 }));
+        return addCorsHeaders(new Response(JSON.stringify({ error: 'Unauthorized' }), { 
+          status: 401,
+          headers: { 'Content-Type': 'application/json' }
+        }));
       }
 
       // --- MAIN LOGIC ---
@@ -418,7 +639,10 @@ export default {
         return addCorsHeaders(new Response(JSON.stringify({ lectures: results }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
       } catch (error) {
         console.error('Get my lectures error:', error);
-        return addCorsHeaders(new Response('Internal Server Error', { status: 500 }));
+        return addCorsHeaders(new Response(JSON.stringify({ error: 'Internal Server Error' }), { 
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        }));
       }
     }
 
@@ -427,7 +651,10 @@ export default {
       // --- VALIDATE SESSION ---
       const userId = await validateSession(request, env.lecturelens_db);
       if (!userId){
-        return addCorsHeaders(new Response('Unauthorized', { status: 401 }));
+        return addCorsHeaders(new Response(JSON.stringify({ error: 'Unauthorized' }), { 
+          status: 401,
+          headers: { 'Content-Type': 'application/json' }
+        }));
       }
 
       try {
@@ -438,7 +665,10 @@ export default {
       return addCorsHeaders(new Response(JSON.stringify({ message: 'Logout successful' }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
       } catch (error) {
         console.error('Logout error:', error);
-        return addCorsHeaders(new Response('Internal Server Error', { status: 500 }));
+        return addCorsHeaders(new Response(JSON.stringify({ error: 'Internal Server Error' }), { 
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        }));
       }
     }
 

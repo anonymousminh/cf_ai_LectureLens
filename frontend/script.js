@@ -5,6 +5,23 @@ let currentLectureId = null;
 let isLoginMode = true; // Track if user is in login mode or signup mode
 let authToken = null; // Store the authentication token
 
+// Helper function to safely parse error responses (handles both JSON and plain text)
+async function parseErrorResponse(response) {
+    const contentType = response.headers.get('Content-Type');
+    if (contentType && contentType.includes('application/json')) {
+        try {
+            const data = await response.json();
+            return data.error || data.message || 'Unknown error';
+        } catch (e) {
+            // If JSON parsing fails, try text
+            return await response.text();
+        }
+    } else {
+        // Plain text response
+        return await response.text();
+    }
+}
+
 // Get the DOM elements for the auth form
 const authContainer = document.getElementById("auth-container");
 const authForm = document.getElementById("auth-form");
@@ -58,6 +75,16 @@ async function signupUser(email, password){
         body: JSON.stringify({email: email, password: password})
     });
 
+    // Check for 429 Rate Limit Exceeded
+    if (response.status === 429){
+        const errorBody = await response.json();
+        const retryAfter = errorBody.retryAfter || 60;
+        const minutes = Math.floor(retryAfter / 60);
+        const seconds = retryAfter % 60;
+        const timeMsg = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+        throw new Error(`Too many signup attempts! Please wait ${timeMsg} before trying again.`);
+    }
+
     if (!response.ok){
         const errorText = await response.text();
         throw new Error(errorText || 'Signup failed. Please try again.');
@@ -75,6 +102,16 @@ async function loginUser(email, password){
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({email: email, password: password})
     });
+
+    // Check for 429 Rate Limit Exceeded
+    if (response.status === 429){
+        const errorBody = await response.json();
+        const retryAfter = errorBody.retryAfter || 60;
+        const minutes = Math.floor(retryAfter / 60);
+        const seconds = retryAfter % 60;
+        const timeMsg = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+        throw new Error(`Too many login attempts! Please wait ${timeMsg} before trying again.`);
+    }
 
     if (!response.ok){
         const errorText = await response.text();
@@ -297,10 +334,20 @@ async function uploadLecture(fileName, fileContent){
             return;
         }
 
+        // Check for 429 Rate Limit Exceeded
+        if (response.status === 429){
+            const errorBody = await response.json();
+            const retryAfter = errorBody.retryAfter || 60;
+            const minutes = Math.floor(retryAfter / 60);
+            const seconds = retryAfter % 60;
+            const timeMsg = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+            throw new Error(`Too many uploads! Please wait ${timeMsg} before uploading again. (${errorBody.limit} uploads per hour allowed)`);
+        }
+
         // Check the HTTP errors
         if (!response.ok){
-            const errorBody = await response.json();
-            throw new Error(`API Error (${response.status}): ${errorBody.error || errorBody.message || 'Unknown error'}`);
+            const errorMessage = await parseErrorResponse(response);
+            throw new Error(`API Error (${response.status}): ${errorMessage}`);
         }
 
         // Parsing the JSON body and return the lecture ID
@@ -409,10 +456,20 @@ async function callChatAPI(message) {
         throw new Error('Session expired');
     }
 
+    // Check for 429 Rate Limit Exceeded
+    if (response.status === 429){
+        const errorBody = await response.json();
+        const retryAfter = errorBody.retryAfter || 60;
+        const minutes = Math.floor(retryAfter / 60);
+        const seconds = retryAfter % 60;
+        const timeMsg = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+        throw new Error(`You're asking questions too quickly! Please wait ${timeMsg} before trying again. (${errorBody.limit} requests per minute allowed)`);
+    }
+
     // Check the HTTP errors
     if (!response.ok){
-        const errorBody = await response.json();
-        throw new Error(`API Error (${response.status}): ${errorBody.error || errorBody.message || 'Unknown error'}`);
+        const errorMessage = await parseErrorResponse(response);
+        throw new Error(`API Error (${response.status}): ${errorMessage}`);
     }
 
     // Parsing the JSON body and return the AI response
@@ -444,8 +501,8 @@ async function callSummerizeAPI(){
         }
 
         if (!rawTextResponse.ok){
-            const errorBody = await rawTextResponse.json();
-            throw new Error(`Failed to retrieve raw lecture text (${rawTextResponse.status}): ${errorBody.error || errorBody.message || 'Unknown error'}`);
+            const errorMessage = await parseErrorResponse(rawTextResponse);
+            throw new Error(`Failed to retrieve raw lecture text (${rawTextResponse.status}): ${errorMessage}`);
         }
 
         const rawTextData = await rawTextResponse.json();
@@ -469,9 +526,19 @@ async function callSummerizeAPI(){
             return;
         }
 
-        if (!summarizeResponse.ok){
+        // Check for 429 Rate Limit Exceeded
+        if (summarizeResponse.status === 429){
             const errorBody = await summarizeResponse.json();
-            throw new Error(`Failed to summarize lecture content (${summarizeResponse.status}): ${errorBody.error || errorBody.message || 'Unknown error'}`);
+            const retryAfter = errorBody.retryAfter || 60;
+            const minutes = Math.floor(retryAfter / 60);
+            const seconds = retryAfter % 60;
+            const timeMsg = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+            throw new Error(`Too many summarizations! Please wait ${timeMsg} before trying again. (${errorBody.limit} per hour allowed)`);
+        }
+
+        if (!summarizeResponse.ok){
+            const errorMessage = await parseErrorResponse(summarizeResponse);
+            throw new Error(`Failed to summarize lecture content (${summarizeResponse.status}): ${errorMessage}`);
         }
 
         const summarizeData = await summarizeResponse.json();
@@ -510,8 +577,8 @@ async function callExtractAPI(){
         }
 
         if (!rawTextResponse.ok){
-            const errorBody = await rawTextResponse.json();
-            throw new Error(`Failed to retrieve raw lecture text (${rawTextResponse.status}): ${errorBody.error || errorBody.message || 'Unknown error'}`);
+            const errorMessage = await parseErrorResponse(rawTextResponse);
+            throw new Error(`Failed to retrieve raw lecture text (${rawTextResponse.status}): ${errorMessage}`);
         }
 
         const rawTextData = await rawTextResponse.json();
@@ -535,9 +602,19 @@ async function callExtractAPI(){
             return;
         }
 
-        if (!extractResponse.ok){
+        // Check for 429 Rate Limit Exceeded
+        if (extractResponse.status === 429){
             const errorBody = await extractResponse.json();
-            throw new Error(`Failed to extract concepts (${extractResponse.status}): ${errorBody.error || errorBody.message || 'Unknown error'}`);
+            const retryAfter = errorBody.retryAfter || 60;
+            const minutes = Math.floor(retryAfter / 60);
+            const seconds = retryAfter % 60;
+            const timeMsg = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+            throw new Error(`Too many concept extractions! Please wait ${timeMsg} before trying again. (${errorBody.limit} per hour allowed)`);
+        }
+
+        if (!extractResponse.ok){
+            const errorMessage = await parseErrorResponse(extractResponse);
+            throw new Error(`Failed to extract concepts (${extractResponse.status}): ${errorMessage}`);
         }
 
         const extractData = await extractResponse.json();
