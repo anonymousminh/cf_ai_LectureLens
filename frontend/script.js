@@ -170,11 +170,12 @@ async function handleAuthFormSubmit(event){
         return;
     }
 
-    // Disable the form during submission
+    // Disable the form during submission with animated loading
     authEmail.disabled = true;
     authPassword.disabled = true;
     authButton.disabled = true;
-    authButton.textContent = 'Processing...';
+    authButton.classList.add('loading');
+    authButton.textContent = isLoginMode ? 'Logging in...' : 'Creating account...';
 
     try {
         let response;
@@ -228,6 +229,7 @@ async function handleAuthFormSubmit(event){
         authEmail.disabled = false;
         authPassword.disabled = false;
         authButton.disabled = false;
+        authButton.classList.remove('loading');
         authButton.textContent = isLoginMode ? 'Login' : 'Sign Up';
     }
 }
@@ -295,8 +297,8 @@ async function handleFileUpload(){
         return;
     }
 
-    // Display the loading message
-    const uploadMessage = displayMessage(`Uploading and processing "${file.name}"...`, 'system');
+    // Display the animated loading message with progress bar
+    const uploadMessage = displayLoadingMessage(`Processing "${file.name}"`, 'upload');
 
     // Disable the upload input
     setUIState(false);
@@ -307,7 +309,7 @@ async function handleFileUpload(){
         
         // Handle PDF files
         if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-            uploadMessage.textContent = `Extracting text from PDF "${file.name}"...`;
+            updateLoadingMessage(uploadMessage, `Extracting text from PDF`);
             fileContent = await extractTextFromPDF(file);
             
             if (!fileContent || fileContent.trim().length === 0) {
@@ -318,6 +320,7 @@ async function handleFileUpload(){
         } 
         // Handle text files
         else {
+            updateLoadingMessage(uploadMessage, `Reading file content`);
             fileContent = await readTextFile(file);
         }
 
@@ -325,7 +328,7 @@ async function handleFileUpload(){
         console.log(`Received file: ${file.name}. Content preview: ${fileContent.substring(0, 100)}...`);
 
         // Upload the lecture to the API
-        uploadMessage.textContent = `Uploading "${file.name}" to server...`;
+        updateLoadingMessage(uploadMessage, `Uploading to server`);
         await uploadLecture(file.name, String(fileContent));
         
         // Remove the upload progress message after successful upload
@@ -508,6 +511,86 @@ function displayMessage(text, role){
     return messageElement;
 }
 
+// Display Loading Message with animated spinner
+function displayLoadingMessage(text, type = 'default'){
+    const wasAtBottom = isAtBottom();
+    
+    const messageElement = document.createElement('div');
+    messageElement.classList.add('message', 'system', 'loading');
+    
+    // Create spinner
+    const spinner = document.createElement('div');
+    spinner.classList.add('loading-spinner');
+    
+    // Create text container with animated dots
+    const textContainer = document.createElement('div');
+    textContainer.classList.add('loading-content');
+    
+    const textSpan = document.createElement('span');
+    textSpan.classList.add('loading-text');
+    textSpan.textContent = text;
+    
+    const dotsContainer = document.createElement('span');
+    dotsContainer.classList.add('loading-dots');
+    dotsContainer.innerHTML = '<span></span><span></span><span></span>';
+    
+    textContainer.appendChild(textSpan);
+    textContainer.appendChild(dotsContainer);
+    
+    messageElement.appendChild(spinner);
+    messageElement.appendChild(textContainer);
+    
+    // For upload type, add progress bar
+    if (type === 'upload') {
+        const progressContainer = document.createElement('div');
+        progressContainer.classList.add('upload-progress');
+        
+        const progressBarContainer = document.createElement('div');
+        progressBarContainer.classList.add('progress-bar-container');
+        
+        const progressBar = document.createElement('div');
+        progressBar.classList.add('progress-bar');
+        
+        progressBarContainer.appendChild(progressBar);
+        progressContainer.appendChild(progressBarContainer);
+        
+        messageElement.appendChild(progressContainer);
+        messageElement.style.flexDirection = 'column';
+        messageElement.style.alignItems = 'flex-start';
+    }
+    
+    chatWindow.appendChild(messageElement);
+    
+    if (wasAtBottom) {
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+    
+    return messageElement;
+}
+
+// Update loading message text
+function updateLoadingMessage(element, text) {
+    const textSpan = element.querySelector('.loading-text');
+    if (textSpan) {
+        textSpan.textContent = text;
+    }
+}
+
+// Convert loading message to regular message
+function convertLoadingToMessage(element, text, role) {
+    element.classList.remove('loading', 'system');
+    element.classList.add(role);
+    
+    if (role === 'assistant') {
+        element.innerHTML = DOMPurify.sanitize(marked.parse(text));
+    } else if (role === 'error') {
+        element.classList.add('error');
+        element.textContent = text;
+    } else {
+        element.textContent = text;
+    }
+}
+
 // Helper function to check if chat window is scrolled to bottom
 function isAtBottom() {
     const threshold = 100; // pixels from bottom to consider "at bottom"
@@ -533,27 +616,24 @@ async function sendMessage(){
     // Disable the input and send button immediately after user send messages
     setUIState(false);
 
-    // Display the loading assistant response
-    const loadingMessage = displayMessage("Thinking...", 'assistant')
+    // Display the animated loading message
+    const loadingMessage = displayLoadingMessage("Thinking", 'default');
 
     try {
-    // Await the result of callChatAPI
-    const aiResponse = await callChatAPI(messageText);
+        // Await the result of callChatAPI
+        const aiResponse = await callChatAPI(messageText);
 
-    // Display the AI response
-    loadingMessage.textContent = aiResponse;
+        // Convert loading to assistant response
+        convertLoadingToMessage(loadingMessage, aiResponse, 'assistant');
     } catch (error){
         console.error("Chat Error:", error);
-        loadingMessage.textContent = `Error: ${error.message}. Please try again.`;
-        loadingMessage.classList.add('error');
+        convertLoadingToMessage(loadingMessage, `Error: ${error.message}. Please try again.`, 'error');
     } finally {
         // ------ End loading state ------
         // Re-enable the UI
         setUIState(true);
         chatInput.focus();
     }
-
-
 }
 
 // callChatAPI function
@@ -604,10 +684,11 @@ async function callChatAPI(message) {
 // callSummarizeAPI function
 async function callSummerizeAPI(){
     setUIState(false);
-    const loadingMessage = displayMessage("Generating summary...", 'system');
+    const loadingMessage = displayLoadingMessage("Generating summary", 'default');
 
     try {
         // 1. Retrieve the raw lecture text from DO
+        updateLoadingMessage(loadingMessage, "Fetching lecture content");
         const rawTextUrl = `${API_BASE_PATH}/chat/${currentLectureId}/raw-lecture-text`;
         const rawTextResponse = await fetch(rawTextUrl, {
             headers: {'Authorization': `Bearer ${authToken}`},
@@ -616,6 +697,7 @@ async function callSummerizeAPI(){
         // Check for 401 Unauthorized (expired session)
         if (rawTextResponse.status === 401){
             handleUnauthorized();
+            loadingMessage.remove();
             return;
         }
 
@@ -632,6 +714,7 @@ async function callSummerizeAPI(){
         }
 
         // 2. Send the raw lecture content to the summarize endpoint
+        updateLoadingMessage(loadingMessage, "AI is generating summary");
         const summarizeUrl = `${API_BASE_PATH}/summarize`;
         const summarizeResponse = await fetch(summarizeUrl, {
             method: 'POST',
@@ -642,6 +725,7 @@ async function callSummerizeAPI(){
         // Check for 401 Unauthorized (expired session)
         if (summarizeResponse.status === 401){
             handleUnauthorized();
+            loadingMessage.remove();
             return;
         }
 
@@ -663,16 +747,13 @@ async function callSummerizeAPI(){
         const summarizeData = await summarizeResponse.json();
         const summary = summarizeData.summary;
 
-        loadingMessage.innerHTML = DOMPurify.sanitize(marked.parse(`Lecture Summary:\n\n ${summary}`));
-        loadingMessage.classList.remove('system');
-        loadingMessage.classList.add('assistant');
+        convertLoadingToMessage(loadingMessage, `**Lecture Summary:**\n\n${summary}`, 'assistant');
         
         // Scroll to bottom to show the full summary
         chatWindow.scrollTop = chatWindow.scrollHeight;
     } catch (error){
         console.log("Summarize Error:", error);
-        loadingMessage.textContent = `Error generating summary: ${error.message}. Please try again.`;
-        loadingMessage.classList.add('error');
+        convertLoadingToMessage(loadingMessage, `Error generating summary: ${error.message}. Please try again.`, 'error');
     } finally {
         // Re-enable the UI
         setUIState(true);
@@ -683,10 +764,11 @@ async function callSummerizeAPI(){
 async function callExtractAPI(){
     if (!currentLectureId) return;
     setUIState(false);
-    const loadingMessage = displayMessage("Extracting concepts...", 'system');
+    const loadingMessage = displayLoadingMessage("Extracting concepts", 'default');
     
     try {
         // 1. Retrieve the raw lecture text from DO
+        updateLoadingMessage(loadingMessage, "Fetching lecture content");
         const rawTextUrl = `${API_BASE_PATH}/chat/${currentLectureId}/raw-lecture-text`;
         const rawTextResponse = await fetch(rawTextUrl, {
             headers: {'Authorization': `Bearer ${authToken}`},
@@ -695,6 +777,7 @@ async function callExtractAPI(){
         // Check for 401 Unauthorized (expired session)
         if (rawTextResponse.status === 401){
             handleUnauthorized();
+            loadingMessage.remove();
             return;
         }
 
@@ -711,6 +794,7 @@ async function callExtractAPI(){
         }
 
         // 2. Send the lectureId to the extract endpoint  
+        updateLoadingMessage(loadingMessage, "AI is extracting key concepts");
         const extractUrl = `${API_BASE_PATH}/extract-concepts`;
         const extractResponse = await fetch(extractUrl, {
             method: 'POST',
@@ -721,6 +805,7 @@ async function callExtractAPI(){
         // Check for 401 Unauthorized (expired session)
         if (extractResponse.status === 401){
             handleUnauthorized();
+            loadingMessage.remove();
             return;
         }
 
@@ -742,16 +827,13 @@ async function callExtractAPI(){
         const extractData = await extractResponse.json();
         const concepts = extractData.coreConcepts;
 
-        loadingMessage.innerHTML = DOMPurify.sanitize(marked.parse(`Extracted Concepts:\n\n ${concepts}`));
-        loadingMessage.classList.remove('system');
-        loadingMessage.classList.add('assistant');
+        convertLoadingToMessage(loadingMessage, `**Extracted Concepts:**\n\n${concepts}`, 'assistant');
         
         // Scroll to bottom to show the full content
         chatWindow.scrollTop = chatWindow.scrollHeight;
     } catch (error){
         console.log("Extract Error:", error);
-        loadingMessage.textContent = `Error extracting concepts: ${error.message}. Please try again.`;
-        loadingMessage.classList.add('error');
+        convertLoadingToMessage(loadingMessage, `Error extracting concepts: ${error.message}. Please try again.`, 'error');
     } finally {
         // Re-enable the UI
         setUIState(true);
