@@ -17,7 +17,17 @@ export async function onRequestPost(context) {
   }
   
   try {
-    const response = await env.WORKER_BACKEND.fetch(request);
+    // Create a new request with the correct path for the Worker
+    const workerUrl = new URL(request.url);
+    workerUrl.hostname = 'worker-backend';
+    
+    const workerRequest = new Request(workerUrl.toString(), {
+      method: request.method,
+      headers: request.headers,
+      body: request.body
+    });
+    
+    const response = await env.WORKER_BACKEND.fetch(workerRequest);
     return response;
   } catch (error) {
     return new Response(JSON.stringify({
