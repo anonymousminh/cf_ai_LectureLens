@@ -56,13 +56,13 @@
 	"migrations": [
 		{
 			"tag": "v1",
-			"new_classes": [
+			"new_sqlite_classes": [
 				"LectureMemory"
 			]
 		},
 		{
 			"tag": "v2",
-			"new_classes": [
+			"new_sqlite_classes": [
 				"RateLimiter"
 			]
 		}
