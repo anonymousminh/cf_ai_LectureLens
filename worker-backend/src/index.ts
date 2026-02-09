@@ -257,18 +257,81 @@ export default {
           }));
         }
 
-        const systemPrompt = "You are a helpful study assistant. Summarize the following lecture transcript into clear, structured key points. Use Markdown formatting for readability.";
-        const userPrompt = `Lecture Transcript:\n\n${text}`;
+        const model = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 
-        const model = '@cf/meta/llama-3.1-8b-instruct';
-        const response = await env.AI.run(model, {
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ]
-        });
+        // For long documents, split into chunks and summarize each, then combine
+        const MAX_CHARS_PER_CHUNK = 12000; // ~3000 tokens per chunk (safe for context window)
+        let summary: string;
 
-        const summary = response.response;
+        if (text.length <= MAX_CHARS_PER_CHUNK) {
+          // Short document: summarize directly
+          const systemPrompt = "You are a helpful study assistant. Summarize the following lecture transcript into clear, structured key points. Use Markdown formatting for readability. Be thorough and cover ALL major topics discussed in the lecture.";
+          const userPrompt = `Lecture Transcript:\n\n${text}`;
+
+          const response = await env.AI.run(model, {
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ],
+            max_tokens: 4096
+          });
+
+          summary = response.response;
+        } else {
+          // Long document: chunk → summarize each → combine summaries
+          const chunks: string[] = [];
+          const words = text.split(/\s+/);
+          let currentChunk = '';
+
+          for (const word of words) {
+            if ((currentChunk + ' ' + word).length > MAX_CHARS_PER_CHUNK) {
+              chunks.push(currentChunk.trim());
+              currentChunk = word;
+            } else {
+              currentChunk += ' ' + word;
+            }
+          }
+          if (currentChunk.trim()) {
+            chunks.push(currentChunk.trim());
+          }
+
+          console.log(`Summarizing long document: ${text.length} chars, ${chunks.length} chunks`);
+
+          // Summarize each chunk
+          const chunkSummaries: string[] = [];
+          for (let i = 0; i < chunks.length; i++) {
+            const chunkSystemPrompt = `You are a helpful study assistant. Summarize the following section (part ${i + 1} of ${chunks.length}) of a lecture transcript into clear, structured key points. Use Markdown formatting. Be thorough and cover all topics in this section.`;
+            const chunkUserPrompt = `Lecture Section:\n\n${chunks[i]}`;
+
+            const chunkResponse = await env.AI.run(model, {
+              messages: [
+                { role: 'system', content: chunkSystemPrompt },
+                { role: 'user', content: chunkUserPrompt }
+              ],
+              max_tokens: 2048
+            });
+
+            chunkSummaries.push(chunkResponse.response);
+          }
+
+          // If we had multiple chunks, combine the summaries into a final cohesive summary
+          if (chunkSummaries.length > 1) {
+            const combineSystemPrompt = "You are a helpful study assistant. You are given summaries of different sections of a lecture. Combine them into one cohesive, well-organized summary with clear key points. Use Markdown formatting with headings and bullet points. Remove any redundancy but keep all unique information.";
+            const combineUserPrompt = `Section Summaries:\n\n${chunkSummaries.map((s, i) => `--- Section ${i + 1} ---\n${s}`).join('\n\n')}`;
+
+            const combineResponse = await env.AI.run(model, {
+              messages: [
+                { role: 'system', content: combineSystemPrompt },
+                { role: 'user', content: combineUserPrompt }
+              ],
+              max_tokens: 4096
+            });
+
+            summary = combineResponse.response;
+          } else {
+            summary = chunkSummaries[0];
+          }
+        }
 
         return addCorsHeaders(new Response(JSON.stringify({ summary }), {
           headers: { 'Content-Type': 'application/json' },
@@ -536,20 +599,78 @@ export default {
           }));
         }
 
-        // Construct the system prompt for the Worker AI
-        const systemPrompt = "You are a specilized academic assistant. Analyze the following lecture text and extract all key definitions, mathematical formulas, and core theoretical concepts. Format the output clearly using Markdown with bold terms and bullet points";
-        const userPrompt = `Lecture Text:\n\n${rawLectureText}`;
+        // Call the Worker AI with chunking for long documents
+        const model = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+        const MAX_CHARS_PER_CHUNK = 12000;
+        let coreConceptsResponse: string;
 
-        // Call the Worker AI
-        const model = '@cf/meta/llama-3.1-8b-instruct';
-        const coreConcepts = await env.AI.run(model, {
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ]
-        });
-        
-        const coreConceptsResponse = coreConcepts.response;
+        if (rawLectureText.length <= MAX_CHARS_PER_CHUNK) {
+          // Short document: extract directly
+          const systemPrompt = "You are a specialized academic assistant. Analyze the following lecture text and extract all key definitions, mathematical formulas, and core theoretical concepts. Format the output clearly using Markdown with bold terms and bullet points. Be thorough and cover ALL concepts in the text.";
+          const userPrompt = `Lecture Text:\n\n${rawLectureText}`;
+
+          const coreConcepts = await env.AI.run(model, {
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ],
+            max_tokens: 4096
+          });
+
+          coreConceptsResponse = coreConcepts.response;
+        } else {
+          // Long document: chunk → extract from each → combine
+          const chunks: string[] = [];
+          const words = rawLectureText.split(/\s+/);
+          let currentChunk = '';
+
+          for (const word of words) {
+            if ((currentChunk + ' ' + word).length > MAX_CHARS_PER_CHUNK) {
+              chunks.push(currentChunk.trim());
+              currentChunk = word;
+            } else {
+              currentChunk += ' ' + word;
+            }
+          }
+          if (currentChunk.trim()) {
+            chunks.push(currentChunk.trim());
+          }
+
+          console.log(`Extracting concepts from long document: ${rawLectureText.length} chars, ${chunks.length} chunks`);
+
+          const chunkExtracts: string[] = [];
+          for (let i = 0; i < chunks.length; i++) {
+            const chunkSystemPrompt = `You are a specialized academic assistant. Analyze the following section (part ${i + 1} of ${chunks.length}) of a lecture and extract all key definitions, mathematical formulas, and core theoretical concepts. Format the output clearly using Markdown with bold terms and bullet points.`;
+            const chunkUserPrompt = `Lecture Section:\n\n${chunks[i]}`;
+
+            const chunkResponse = await env.AI.run(model, {
+              messages: [
+                { role: 'system', content: chunkSystemPrompt },
+                { role: 'user', content: chunkUserPrompt }
+              ],
+              max_tokens: 2048
+            });
+
+            chunkExtracts.push(chunkResponse.response);
+          }
+
+          if (chunkExtracts.length > 1) {
+            const combineSystemPrompt = "You are a specialized academic assistant. You are given concept extractions from different sections of a lecture. Combine them into one cohesive, well-organized list of all key definitions, formulas, and core concepts. Use Markdown formatting with bold terms and bullet points. Remove duplicates but keep all unique concepts.";
+            const combineUserPrompt = `Section Extractions:\n\n${chunkExtracts.map((s, i) => `--- Section ${i + 1} ---\n${s}`).join('\n\n')}`;
+
+            const combineResponse = await env.AI.run(model, {
+              messages: [
+                { role: 'system', content: combineSystemPrompt },
+                { role: 'user', content: combineUserPrompt }
+              ],
+              max_tokens: 4096
+            });
+
+            coreConceptsResponse = combineResponse.response;
+          } else {
+            coreConceptsResponse = chunkExtracts[0];
+          }
+        }
         
         // Return the core concepts
         return addCorsHeaders(new Response(JSON.stringify({ coreConcepts: coreConceptsResponse }), {
