@@ -38,6 +38,9 @@
 	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
 	 */
 	// "services": [  {   "binding": "MY_SERVICE",   "service": "my-service"  } ]
+	"vars": {
+		"GOOGLE_CLIENT_ID": "908607822794-8ve2epafvpspdnkcbfoo891ooiv1ekqd.apps.googleusercontent.com"
+	},
 	"ai":{
 		"binding": "AI"
 	},

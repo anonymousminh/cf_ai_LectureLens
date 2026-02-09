@@ -4,6 +4,9 @@ CREATE TABLE users (
     email TEXT UNIQUE,
     password_hash TEXT,
     salt TEXT,
+    auth_provider TEXT DEFAULT 'email',
+    google_id TEXT,
+    name TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

@@ -20,6 +20,7 @@ interface Env {
   LECTURE_MEMORY: DurableObjectNamespace;
   RATE_LIMITER: DurableObjectNamespace;
   lecturelens_db: D1Database;
+  GOOGLE_CLIENT_ID: string;
 }
 
 export { LectureMemory, RateLimiter };
@@ -640,6 +641,115 @@ export default {
       }
     }
 
+    // GOOGLE AUTH ENDPOINT
+    if (path === '/api/auth/google' && request.method === 'POST') {
+      // --- IP-BASED RATE LIMITING (reuse login limits) ---
+      const ipAddress = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rateLimitStatus = await checkRateLimit(ipAddress, 'login', env);
+      if (!rateLimitStatus.allowed) {
+        console.log('Rate limit exceeded for google auth', { ip: ipAddress, remaining: rateLimitStatus.remaining });
+        return createRateLimitResponse(rateLimitStatus);
+      }
+
+      try {
+        const { credential } = await request.json() as { credential: string };
+
+        if (!credential) {
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Missing Google credential token' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          }));
+        }
+
+        // Verify the Google ID token using Google's tokeninfo endpoint
+        const googleResponse = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`);
+        if (!googleResponse.ok) {
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Invalid Google token' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' }
+          }));
+        }
+
+        const googleUser = await googleResponse.json() as {
+          sub: string;
+          email: string;
+          email_verified: string;
+          name?: string;
+          aud: string;
+        };
+
+        // Verify the token audience matches our Google Client ID
+        if (googleUser.aud !== env.GOOGLE_CLIENT_ID) {
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Token audience mismatch' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' }
+          }));
+        }
+
+        // Ensure the email is verified by Google
+        if (googleUser.email_verified !== 'true') {
+          return addCorsHeaders(new Response(JSON.stringify({ error: 'Google email is not verified' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          }));
+        }
+
+        const email = googleUser.email;
+        const googleId = googleUser.sub;
+        const name = googleUser.name || '';
+
+        // Look for existing user by google_id first (returning Google user)
+        let user = await env.lecturelens_db.prepare(
+          'SELECT id, email, auth_provider, google_id FROM users WHERE google_id = ?'
+        ).bind(googleId).first() as { id: string; email: string; auth_provider: string; google_id: string } | null;
+
+        let isNewUser = false;
+
+        if (!user) {
+          // Check if a user with this email already exists (email/password user)
+          user = await env.lecturelens_db.prepare(
+            'SELECT id, email, auth_provider, google_id FROM users WHERE email = ?'
+          ).bind(email).first() as { id: string; email: string; auth_provider: string; google_id: string } | null;
+
+          if (user) {
+            // Existing email user → link their Google account
+            await env.lecturelens_db.prepare(
+              'UPDATE users SET google_id = ?, name = COALESCE(name, ?) WHERE id = ?'
+            ).bind(googleId, name, user.id).run();
+          } else {
+            // Brand new user → create account with Google provider
+            const userId = crypto.randomUUID();
+            await env.lecturelens_db.prepare(
+              'INSERT INTO users (id, email, auth_provider, google_id, name, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+            ).bind(userId, email, 'google', googleId, name, new Date().toISOString()).run();
+            user = { id: userId, email, auth_provider: 'google', google_id: googleId };
+            isNewUser = true;
+          }
+        }
+
+        // Create a session token (same as regular login)
+        const token = crypto.randomUUID();
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+        await env.lecturelens_db.prepare(
+          'INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'
+        ).bind(token, user.id, new Date().toISOString(), expiresAt.toISOString()).run();
+
+        return addCorsHeaders(new Response(JSON.stringify({
+          token: token,
+          message: isNewUser ? 'Account created with Google' : 'Login successful with Google',
+          isNewUser: isNewUser,
+          expiresAt: expiresAt.toISOString()
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      } catch (error) {
+        console.error('Google auth error:', error);
+        return addCorsHeaders(new Response(JSON.stringify({ error: 'Google authentication failed' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        }));
+      }
+    }
+
     // LOGIN ENDPOINT
     if (path === '/api/auth/login' && request.method === 'POST') {
       // --- IP-BASED RATE LIMITING ---
@@ -859,11 +969,42 @@ export default {
           'SELECT COUNT(*) as count FROM users WHERE created_at > ?'
         ).bind(sevenDaysAgo).first();
 
+        // Get auth provider breakdown
+        const emailUsersResult = await env.lecturelens_db.prepare(
+          "SELECT COUNT(*) as count FROM users WHERE auth_provider = 'email'"
+        ).first();
+        
+        const googleUsersResult = await env.lecturelens_db.prepare(
+          "SELECT COUNT(*) as count FROM users WHERE auth_provider = 'google'"
+        ).first();
+
+        // Google-linked users (email users who also connected Google)
+        const googleLinkedResult = await env.lecturelens_db.prepare(
+          "SELECT COUNT(*) as count FROM users WHERE auth_provider = 'email' AND google_id IS NOT NULL"
+        ).first();
+
+        // Google signups in the last 24 hours
+        const recentGoogleSignupsResult = await env.lecturelens_db.prepare(
+          "SELECT COUNT(*) as count FROM users WHERE auth_provider = 'google' AND created_at > ?"
+        ).bind(oneDayAgo).first();
+
+        // Google signups in the last 7 days
+        const weeklyGoogleSignupsResult = await env.lecturelens_db.prepare(
+          "SELECT COUNT(*) as count FROM users WHERE auth_provider = 'google' AND created_at > ?"
+        ).bind(sevenDaysAgo).first();
+
         return addCorsHeaders(new Response(JSON.stringify({
           totalUsers: userCountResult?.count || 0,
           totalLectures: lectureCountResult?.count || 0,
           signupsLast24Hours: recentSignupsResult?.count || 0,
           signupsLast7Days: weeklySignupsResult?.count || 0,
+          authProviders: {
+            emailUsers: emailUsersResult?.count || 0,
+            googleUsers: googleUsersResult?.count || 0,
+            googleLinkedUsers: googleLinkedResult?.count || 0,
+          },
+          googleSignupsLast24Hours: recentGoogleSignupsResult?.count || 0,
+          googleSignupsLast7Days: weeklyGoogleSignupsResult?.count || 0,
           timestamp: new Date().toISOString()
         }), { 
           status: 200, 
