@@ -720,6 +720,73 @@ label {
     background-color: #8fcd91;
 }
 
+/* ===== Google Auth Styles ===== */
+
+.auth-divider {
+    display: flex;
+    align-items: center;
+    margin: 16px 0;
+    padding: 0 15%;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background-color: #ddd;
+}
+
+.auth-divider span {
+    padding: 0 12px;
+    color: #999;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+#google-signin-container {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 8px;
+}
+
+.google-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 70%;
+    padding: 10px 16px;
+    border: 1px solid #dadce0;
+    border-radius: 5px;
+    background-color: #fff;
+    color: #3c4043;
+    font-family: 'DM Sans', -apple-system, sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s, box-shadow 0.2s;
+}
+
+.google-btn:hover {
+    background-color: #f7f8f8;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.google-btn:active {
+    background-color: #eee;
+}
+
+.google-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.google-icon {
+    flex-shrink: 0;
+}
+
 /* ===== Loading State Styles ===== */
 
 /* Loading message container */

@@ -5,6 +5,9 @@ let currentLectureId = null;
 let isLoginMode = true; // Track if user is in login mode or signup mode
 let authToken = null; // Store the authentication token
 
+// Google Client ID — replace with your actual Google OAuth Client ID
+const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID_HERE';
+
 // Helper function to safely parse error responses (handles both JSON and plain text)
 async function parseErrorResponse(response) {
     const contentType = response.headers.get('Content-Type');
@@ -69,6 +72,114 @@ function toggleAuthMode(mode){
     // Clear input fields
     authEmail.value = '';
     authPassword.value = '';
+}
+
+// ===== GOOGLE AUTHENTICATION =====
+
+// Initialize Google Sign-In
+function initializeGoogleSignIn() {
+    // Wait for the Google Identity Services library to load
+    if (typeof google === 'undefined' || !google.accounts) {
+        // Retry after a short delay if library hasn't loaded yet
+        setTimeout(initializeGoogleSignIn, 200);
+        return;
+    }
+
+    google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: handleGoogleCredentialResponse,
+    });
+}
+
+// Handle the credential response from Google
+async function handleGoogleCredentialResponse(response) {
+    const googleBtn = document.getElementById('google-signin-btn');
+    
+    // Show loading state
+    googleBtn.disabled = true;
+    googleBtn.textContent = 'Signing in...';
+
+    try {
+        const result = await fetch(`${API_BASE_PATH}/auth/google`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ credential: response.credential })
+        });
+
+        // Check for 429 Rate Limit Exceeded
+        if (result.status === 429) {
+            const errorBody = await result.json();
+            const retryAfter = errorBody.retryAfter || 60;
+            const minutes = Math.floor(retryAfter / 60);
+            const seconds = retryAfter % 60;
+            const timeMsg = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+            throw new Error(`Too many attempts! Please wait ${timeMsg} before trying again.`);
+        }
+
+        if (!result.ok) {
+            const errorData = await result.json();
+            throw new Error(errorData.error || 'Google authentication failed');
+        }
+
+        const data = await result.json();
+
+        // Store the token and show the main app
+        authToken = data.token;
+        localStorage.setItem('LectureLens-authToken', authToken);
+
+        showMainApp();
+
+        if (data.isNewUser) {
+            displayMessage('Welcome to LectureLens! Your Google account has been connected.', 'system');
+        } else {
+            displayMessage('Welcome back! Signed in with Google.', 'system');
+        }
+
+        // Fetch the user's lectures
+        fetchLectureList();
+
+    } catch (error) {
+        console.error('Google auth error:', error);
+        alert(error.message || 'Google sign-in failed. Please try again.');
+    } finally {
+        // Reset button state
+        googleBtn.disabled = false;
+        googleBtn.innerHTML = `
+            <svg class="google-icon" viewBox="0 0 24 24" width="20" height="20">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+            </svg>
+            Continue with Google`;
+    }
+}
+
+// Trigger Google's One Tap / popup sign-in flow
+function triggerGoogleSignIn() {
+    if (typeof google === 'undefined' || !google.accounts) {
+        alert('Google Sign-In is still loading. Please try again in a moment.');
+        return;
+    }
+
+    google.accounts.id.prompt((notification) => {
+        // If One Tap is dismissed or not displayed, fall back to the popup
+        if (notification.isNotDisplayed() || notification.isSkippedMoment() || notification.isDismissedMoment()) {
+            // Use the popup flow as fallback
+            google.accounts.oauth2.initCodeClient({
+                client_id: GOOGLE_CLIENT_ID,
+                scope: 'email profile',
+                callback: () => {},
+            });
+            // Use the button-style prompt instead
+            google.accounts.id.renderButton(
+                document.createElement('div'),
+                { theme: 'outline', size: 'large' }
+            );
+            // Fallback: directly open the Google Sign-In popup
+            window.google.accounts.id.prompt();
+        }
+    });
 }
 
 // Function for Signup
@@ -1116,14 +1227,23 @@ authToggleLink.addEventListener('click', function(event) {
     }
 });
 
+// Google Sign-In button click listener
+const googleSignInBtn = document.getElementById('google-signin-btn');
+if (googleSignInBtn) {
+    googleSignInBtn.addEventListener('click', triggerGoogleSignIn);
+}
+
 // Landing page Get Started buttons
 ['landing-get-started', 'hero-cta', 'how-cta'].forEach(id => {
     const btn = document.getElementById(id);
     if (btn) btn.addEventListener('click', showLandingToAuth);
 });
 
-// Initialize the app
-document.addEventListener('DOMContentLoaded', initializeApp);
+// Initialize the app and Google Sign-In
+document.addEventListener('DOMContentLoaded', () => {
+    initializeApp();
+    initializeGoogleSignIn();
+});
 
 // Handle Clear Button Click
 const clearButton = document.getElementById('clear-button');
