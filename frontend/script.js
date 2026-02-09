@@ -6,7 +6,7 @@ let isLoginMode = true; // Track if user is in login mode or signup mode
 let authToken = null; // Store the authentication token
 
 // Google Client ID — replace with your actual Google OAuth Client ID
-const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID_HERE';
+const GOOGLE_CLIENT_ID = '908607822794-8ve2epafvpspdnkcbfoo891ooiv1ekqd.apps.googleusercontent.com';
 
 // Helper function to safely parse error responses (handles both JSON and plain text)
 async function parseErrorResponse(response) {
@@ -352,6 +352,7 @@ async function handleAuthFormSubmit(event){
 
 // Show Main App Function
 function showMainApp(){
+    if (landingPage) landingPage.style.display = 'none';
     authContainer.style.display = 'none';
     mainApp.style.display = 'flex';
 
