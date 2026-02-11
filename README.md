@@ -3,7 +3,7 @@
 An AI-powered study assistant that helps students understand their lecture materials. Upload lecture PDFs or text files, get instant summaries, extract key concepts, and chat with an AI tutor grounded in your lecture content.
 
 **Live:** Deployed on Cloudflare Workers + Pages
-**Link**: https://lectrurelens.pages.dev
+**Link:** https://lectrurelens.pages.dev
 
 ---
 
