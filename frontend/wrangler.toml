@@ -1,0 +1,12 @@
+# Cloudflare Pages Configuration for Local Development
+# This configuration is used when running: wrangler pages dev
+
+name = "lecturelens-frontend"
+compatibility_date = "2026-01-06"
+
+# Service Binding to connect to the Worker backend
+# In local dev, this will connect to the locally running worker
+[[services]]
+binding = "WORKER_BACKEND"
+service = "worker-backend"  # This should match the name in worker-backend/wrangler.jsonc
+
