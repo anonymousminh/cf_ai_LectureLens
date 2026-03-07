@@ -81,11 +81,19 @@
     <!-- Auth App -->
      <div id="auth-container" style="display: none;">
         <div id="auth-box">
-            <h1 id="auth-title">Login to LectureLens</h1>
+            <div class="auth-logo">LectureLens</div>
+            <h1 id="auth-title">Welcome back</h1>
+            <p class="auth-subtitle">Sign in to continue to your lectures</p>
             <form id="auth-form">
-                <input type="email" id="auth-email" placeholder="Email">
-                <input type="password" id="auth-password" placeholder="Password">
-                <button type="submit" id="auth-button">Login</button>
+                <div class="input-group">
+                    <label for="auth-email">Email</label>
+                    <input type="email" id="auth-email" placeholder="you@example.com">
+                </div>
+                <div class="input-group">
+                    <label for="auth-password">Password</label>
+                    <input type="password" id="auth-password" placeholder="Enter your password">
+                </div>
+                <button type="submit" id="auth-button">Sign in</button>
             </form>
             <div class="auth-divider">
                 <span>or</span>
@@ -97,7 +105,23 @@
 
     <!-- Main App -->
     <div id="main-app" style="display: none;">
-        <h1>LectureLens Study Assistant</h1>
+        <div id="app-header">
+            <div class="app-header-left">
+                <button id="sidebar-toggle" title="Toggle sidebar">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
+                <span class="app-logo">LectureLens</span>
+            </div>
+            <div class="app-header-center">
+                <span id="current-lecture-label">No lecture selected</span>
+            </div>
+            <div class="app-header-right">
+                <button id="logout-button" title="Sign out">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                    <span>Sign out</span>
+                </button>
+            </div>
+        </div>
         <div id="main-content">
             <div id="lecture-sidebar">
                 <div id="sidebar-header">
@@ -105,13 +129,17 @@
                 </div>
                 <div id="upload-section">
                     <input type="file" id="lecture-upload" accept=".txt,.pdf,application/pdf,text/plain">
-                    <label for="lecture-upload">+ Upload New Lecture</label>
+                    <label for="lecture-upload">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        Upload Lecture
+                    </label>
                 </div>
                 <div id="lecture-list-container">
                     <div id="lecture-list">
                         <!-- Lecture items will be dynamically added here -->
                     </div>
                     <div id="lecture-list-empty">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                         <p>No lectures yet</p>
                         <p class="empty-hint">Upload a PDF or TXT file to get started</p>
                     </div>
@@ -120,15 +148,31 @@
             <div id="chat-container">
                 <div id="chat-window">
                     <!-- Initial messages will be added dynamically by script.js -->
-                    <button id="scroll-to-bottom" title="Scroll to bottom">↓</button>
+                    <button id="scroll-to-bottom" title="Scroll to bottom">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
                 </div>
                 <div id="input-area">
-                    <input type="text" id="chat-input" placeholder="Ask a question...">
-                    <button id="summarize-button">Summarize</button>
-                    <button id="extract-button">Extract Concepts</button>
-                    <button id="send-button">Send</button>
-                    <button id="clear-button">Clear</button>
-                    <button id="logout-button">Logout</button>
+                    <div id="input-actions">
+                        <button id="summarize-button" title="Summarize lecture">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="17" y1="10" x2="3" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="17" y1="18" x2="3" y2="18"/></svg>
+                            Summarize
+                        </button>
+                        <button id="extract-button" title="Extract key concepts">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                            Extract
+                        </button>
+                        <button id="clear-button" title="Clear chat">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            Clear
+                        </button>
+                    </div>
+                    <div id="input-row">
+                        <input type="text" id="chat-input" placeholder="Ask a question about your lecture...">
+                        <button id="send-button" title="Send message">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
